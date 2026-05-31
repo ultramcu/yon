@@ -7,19 +7,19 @@
 <p align="center"><b>Throw a request. Catch a response.</b></p>
 
 <p align="center">
-A minimal, fast, offline desktop client for testing HTTP APIs — a lightweight
-Postman alternative. No account, no cloud, no telemetry. One native binary for
-macOS, Windows, and Linux.
+A fast, lightweight, <b>open-source</b> desktop client for testing HTTP APIs.
+A single native binary for macOS, Windows, and Linux — no account, no cloud,
+no telemetry. Your work stays in plain files on your own disk.
 </p>
 
 ---
 
 ## Why Yon
 
-Postman keeps growing heavier and more account-gated. Yon is the opposite: a tiny
-native app that opens instantly, never asks you to log in, and keeps your work in
-plain files on your own disk. It does the everyday job — fire a request, read the
-response — and gets out of your way.
+Yon is small on purpose. It's a tiny native app that opens instantly, never asks
+you to sign in, and keeps everything offline in human-readable files you can commit
+to git. Free and open source under the MIT licence — read it, fork it, ship it. It
+does the everyday job — fire a request, read the response — and gets out of your way.
 
 The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you catch a response.
 
@@ -31,15 +31,30 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
   override it per request
 - **Body:** None · JSON (auto `Content-Type` + pretty) · Text
 - **Response viewer:** status · time · size · headers, with a **Pretty** (indented,
-  JSON syntax-coloured) / **Raw** toggle; large bodies are capped on screen with a
-  *Save to file* escape hatch
+  JSON syntax-coloured) / **Raw** toggle and one-click **Copy**; huge bodies render
+  fast (virtualized) and are capped on screen with a *Save to file* escape hatch
 - **Send / Cancel** any in-flight request
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
   tab per request; your open collections and tabs are restored on the next launch
-- **Connection settings:** request timeout, follow redirects, and an *Allow insecure
-  TLS* toggle for self-signed dev APIs
+- **Themes:** Dark Pro / Warm / System, switchable in Settings
+- **Connection settings:** request timeout, follow redirects, system proxy support,
+  and an *Allow insecure TLS* toggle for self-signed dev APIs
 
-## Install / run from source
+## Install
+
+Download a prebuilt build from the [latest release](https://github.com/ultramcu/yon/releases/latest):
+
+| Platform | Download |
+|---|---|
+| **macOS** (universal — Apple Silicon + Intel) | `Yon-*-macos-universal.zip` |
+| **Windows** | `Yon-*-windows.zip` |
+| **Linux** | `Yon-*-linux.tar.xz` |
+
+> macOS is unsigned, so on first launch right-click the app → **Open** to bypass Gatekeeper.
+
+Or run / build from source (below).
+
+## Run / build from source
 
 Requires **Go 1.26+** and a C toolchain (Fyne uses cgo/OpenGL).
 
@@ -63,10 +78,10 @@ yon mycollection.yon
 yon api/users.yon api/billing.yon
 ```
 
-Package a native app bundle with an embedded icon (optional, needs the Fyne CLI):
+Package a native app bundle with the embedded icon (optional, needs the Fyne CLI):
 
 ```sh
-go run fyne.io/fyne/v2/cmd/fyne package -os darwin   # or windows / linux
+go run fyne.io/tools/cmd/fyne package -os darwin   # or windows / linux
 ```
 
 ## The `.yon` file
@@ -107,7 +122,7 @@ scope, and [`docs/adr/`](docs/adr) for the key decisions.
 ## Roadmap (post-v1)
 
 Environments & variables · request history · collection folders · import from
-Postman / OpenAPI / `.http` · form-data & multipart bodies · copy-as-curl ·
+OpenAPI and `.http` files · form-data & multipart bodies · copy-as-curl ·
 pre-request scripts.
 
 ## License
