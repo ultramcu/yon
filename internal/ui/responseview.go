@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -434,11 +435,31 @@ func (rv *responseView) clearBody() {
 	rv.bodyScroll.Show()
 }
 
-// saveToFile writes the full (un-truncated) body to a user-chosen file.
+// saveToFile writes the full (un-truncated) body to a user-chosen file via a
+// native OS save dialog, falling back to Fyne's in-app dialog if unavailable.
 func (rv *responseView) saveToFile() {
 	if rv.fullBody == nil {
 		return
 	}
+	go func() {
+		path, ok, err := nativeSaveAny("Save Response Body", "response.txt")
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				rv.saveToFileFyne()
+			case !ok:
+				// cancelled
+			default:
+				if werr := os.WriteFile(path, rv.fullBody, 0o644); werr != nil {
+					dialog.ShowError(werr, rv.parent)
+				}
+			}
+		})
+	}()
+}
+
+// saveToFileFyne is the Fyne in-app fallback for saveToFile().
+func (rv *responseView) saveToFileFyne() {
 	dialog.ShowFileSave(func(wc fyne.URIWriteCloser, err error) {
 		if err != nil || wc == nil {
 			return

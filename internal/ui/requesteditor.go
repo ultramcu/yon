@@ -6,6 +6,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -125,9 +126,14 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.sendBtn = widget.NewButtonWithIcon("Send", theme.MailSendIcon(), rt.onSend)
 	rt.sendBtn.Importance = widget.HighImportance
 
-	// Top bar: [Method ▾][URL.................][✈ Send] — a clean compact bar; the
-	// Method Select renders as a "GET ▾" pill and Send is the primary (cyan) action.
-	topBar := container.NewBorder(nil, nil, rt.methodSel, rt.sendBtn, rt.urlEntry)
+	// "cURL" shows the equivalent curl command for the current request.
+	curlBtn := widget.NewButton("cURL", rt.showCurl)
+	curlBtn.Importance = widget.LowImportance
+
+	// Top bar: [Method ▾][URL.................][cURL][✈ Send] — the Method Select
+	// renders as a "GET ▾" pill and Send is the primary (cyan) action.
+	topBar := container.NewBorder(nil, nil, rt.methodSel,
+		container.NewHBox(curlBtn, rt.sendBtn), rt.urlEntry)
 
 	rt.paramsTable = newKVTable(req.Params, func() { rt.commit() })
 	rt.headerTable = newKVTable(req.Headers, func() { rt.commit() })
@@ -211,6 +217,28 @@ func (rt *requestTab) commit() {
 	rt.refreshTabBadges()
 	rt.win.commitRequest(rt.idx, rt.current())
 	rt.win.updateStatusBar()
+}
+
+// showCurl displays the equivalent curl command for the current request in a
+// dialog with a Copy button.
+func (rt *requestTab) showCurl() {
+	cmd := yonner.ToCurl(rt.current(), rt.win.coll, rt.win.app.settings.options())
+
+	entry := widget.NewMultiLineEntry()
+	entry.SetText(cmd)
+	entry.Wrapping = fyne.TextWrapBreak
+
+	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		if a := fyne.CurrentApp(); a != nil {
+			a.Clipboard().SetContent(cmd)
+		}
+	})
+	copyBtn.Importance = widget.HighImportance
+
+	content := container.NewBorder(nil, copyBtn, nil, nil, entry)
+	d := dialog.NewCustom("Copy as cURL", "Close", content, rt.win.win)
+	d.Resize(fyne.NewSize(660, 300))
+	d.Show()
 }
 
 // enabledParamCount counts the rows that are both enabled and have content

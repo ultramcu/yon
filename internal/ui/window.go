@@ -109,7 +109,15 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 		container.NewHBox(w.sidebarCount, add),
 		nil,
 	)
-	return container.NewVBox(header, widget.NewSeparator())
+
+	// Save / Save As toolbar row under the collection title.
+	saveBtn := widget.NewButtonWithIcon("Save", theme.DocumentSaveIcon(), func() { w.save(nil) })
+	saveBtn.Importance = widget.LowImportance
+	saveAsBtn := widget.NewButton("Save As…", func() { w.saveAs(nil) })
+	saveAsBtn.Importance = widget.LowImportance
+	toolbar := container.NewHBox(saveBtn, saveAsBtn)
+
+	return container.NewVBox(header, toolbar, widget.NewSeparator())
 }
 
 // refreshSidebarCount updates the request-count badge in the collection header.
@@ -303,9 +311,31 @@ func (w *Window) buildMenu() {
 	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, collMenu, appMenu))
 }
 
-// open shows a file picker (filtered to *.yon) and loads the chosen Collection
-// into a new window, leaving this window untouched.
+// open shows a native (OS) file picker filtered to *.yon and loads the chosen
+// Collection into a new window. Falls back to Fyne's in-app dialog when the
+// native backend is unavailable (e.g. Linux without zenity).
 func (w *Window) open() {
+	go func() {
+		path, ok, err := nativeOpenYon("Open Collection")
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				w.openFyne() // native unavailable → in-app dialog
+			case !ok:
+				// cancelled — nothing to do
+			default:
+				if e := w.app.OpenPath(path); e != nil {
+					dialog.ShowError(e, w.win)
+					return
+				}
+				w.buildMenu() // refresh Open Recent
+			}
+		})
+	}()
+}
+
+// openFyne is the Fyne in-app fallback for open().
+func (w *Window) openFyne() {
 	d := dialog.NewFileOpen(func(rc fyne.URIReadCloser, err error) {
 		if err != nil || rc == nil {
 			return
@@ -316,7 +346,7 @@ func (w *Window) open() {
 			dialog.ShowError(err, w.win)
 			return
 		}
-		w.buildMenu() // refresh this window's Open Recent list
+		w.buildMenu()
 	}, w.win)
 	d.SetFilter(storage.NewExtensionFileFilter([]string{".yon"}))
 	d.Show()
@@ -382,9 +412,28 @@ func (w *Window) save(done func(bool)) {
 	}
 }
 
-// saveAs prompts for a path (defaulting the filename to *.yon) and saves there,
+// saveAs prompts for a path (native dialog, Fyne fallback) and saves there,
 // adopting that path as the Collection's file.
 func (w *Window) saveAs(done func(bool)) {
+	go func() {
+		path, ok, err := nativeSaveYon("Save Collection As", "collection.yon")
+		fyne.Do(func() {
+			switch {
+			case err != nil:
+				w.saveAsFyne(done) // native unavailable → in-app dialog
+			case !ok:
+				if done != nil {
+					done(false)
+				}
+			default:
+				w.saveToPath(store.EnsureExt(path), done)
+			}
+		})
+	}()
+}
+
+// saveAsFyne is the Fyne in-app fallback for saveAs().
+func (w *Window) saveAsFyne(done func(bool)) {
 	d := dialog.NewFileSave(func(wc fyne.URIWriteCloser, err error) {
 		if err != nil || wc == nil {
 			if done != nil {
@@ -394,26 +443,32 @@ func (w *Window) saveAs(done func(bool)) {
 		}
 		path := store.EnsureExt(wc.URI().Path())
 		_ = wc.Close() // store.Save reopens by path; avoid double-writer.
-		if err := store.Save(path, w.coll); err != nil {
-			dialog.ShowError(err, w.win)
-			if done != nil {
-				done(false)
-			}
-			return
-		}
-		w.path = path
-		w.dirty = false
-		w.clearTabsDirty()
-		w.updateTitle()
-		w.app.rememberRecent(path) // a Save-As file becomes a recent
-		w.buildMenu()
-		if done != nil {
-			done(true)
-		}
+		w.saveToPath(path, done)
 	}, w.win)
 	d.SetFileName("collection.yon")
 	d.SetFilter(storage.NewExtensionFileFilter([]string{".yon"}))
 	d.Show()
+}
+
+// saveToPath writes the Collection to path and adopts it: clears dirty, updates
+// the title, remembers the file as recent, and rebuilds the menu.
+func (w *Window) saveToPath(path string, done func(bool)) {
+	if err := store.Save(path, w.coll); err != nil {
+		dialog.ShowError(err, w.win)
+		if done != nil {
+			done(false)
+		}
+		return
+	}
+	w.path = path
+	w.dirty = false
+	w.clearTabsDirty()
+	w.updateTitle()
+	w.app.rememberRecent(path)
+	w.buildMenu()
+	if done != nil {
+		done(true)
+	}
 }
 
 // ---- Sidebar verb-chip row ----

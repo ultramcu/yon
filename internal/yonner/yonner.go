@@ -12,7 +12,6 @@ import (
 	"crypto/tls"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -65,30 +64,12 @@ const headerContentType = "Content-Type"
 //     Content-Type: application/json only when the user has not already set a
 //     Content-Type header.
 func Build(ctx context.Context, req model.Request, coll model.Collection) (*http.Request, error) {
-	u, err := url.Parse(strings.TrimSpace(req.URL))
+	// Build the URL with enabled query params appended in order (see requestURL,
+	// shared with ToCurl).
+	finalURL, err := requestURL(req)
 	if err != nil {
 		return nil, err
 	}
-
-	// Append enabled query params, preserving the URL's existing query string AND
-	// the order of both. We concatenate onto RawQuery rather than using
-	// url.Values.Encode (which sorts keys alphabetically and groups duplicates),
-	// so an order-sensitive API (e.g. a signed/canonicalised request) sees the
-	// params exactly as composed — typed-in first, then the table in row order.
-	var qb strings.Builder
-	qb.WriteString(u.RawQuery)
-	for _, p := range req.Params {
-		if !p.Enabled {
-			continue
-		}
-		if qb.Len() > 0 {
-			qb.WriteByte('&')
-		}
-		qb.WriteString(url.QueryEscape(p.Key))
-		qb.WriteByte('=')
-		qb.WriteString(url.QueryEscape(p.Value))
-	}
-	u.RawQuery = qb.String()
 
 	// Body: WYSIWYG — send for any method when present.
 	var body io.Reader
@@ -97,7 +78,7 @@ func Build(ctx context.Context, req model.Request, coll model.Collection) (*http
 		body = strings.NewReader(req.Body.Content)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, string(req.Method), u.String(), body)
+	httpReq, err := http.NewRequestWithContext(ctx, string(req.Method), finalURL, body)
 	if err != nil {
 		return nil, err
 	}
