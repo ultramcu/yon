@@ -1,0 +1,79 @@
+name: Release
+
+# Builds native desktop bundles for macOS / Windows / Linux and attaches them to
+# the GitHub Release for the pushed tag. The release version follows the tag
+# (e.g. tag v0.1.0 -> app version 0.1.0). macOS is a UNIVERSAL build (Apple
+# Silicon arm64 + Intel x86_64) so a single download runs on every Mac.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: package ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install Fyne build deps (linux)
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+
+      - name: Install Fyne CLI
+        run: go install fyne.io/tools/cmd/fyne@latest
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # fyne reads the app version from FyneApp.toml -> sync it to the tag.
+          sed -i.bak 's/^  Version = .*/  Version = "'"$VERSION"'"/' FyneApp.toml && rm -f FyneApp.toml.bak
+          FYNE="$(go env GOPATH)/bin/fyne"
+          if [ "${{ matrix.target }}" = "darwin" ]; then
+            # Build both arches and lipo into a universal binary, then swap it
+            # into the .app that fyne packages.
+            CGO_ENABLED=1 GOARCH=arm64 go build -o yon-arm64 .
+            CGO_ENABLED=1 GOARCH=amd64 go build -o yon-amd64 .
+            lipo -create -output yon-universal yon-arm64 yon-amd64
+            "$FYNE" package -os darwin
+            exe="$(ls Yon.app/Contents/MacOS/*)"
+            cp yon-universal "$exe"
+            lipo -archs "$exe"
+          else
+            "$FYNE" package -os ${{ matrix.target }}
+          fi
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            darwin)  zip -r "dist/Yon-${GITHUB_REF_NAME}-macos-universal.zip" Yon.app ;;
+            windows) 7z a  "dist/Yon-${GITHUB_REF_NAME}-windows.zip" Yon.exe ;;
+            linux)   mv Yon.tar.xz "dist/Yon-${GITHUB_REF_NAME}-linux.tar.xz" ;;
+          esac
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

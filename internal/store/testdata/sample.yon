@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "Sample Collection",
+  "auth": {
+    "kind": "bearer",
+    "token": "collection-default-token"
+  },
+  "requests": [
+    {
+      "name": "List users",
+      "method": "GET",
+      "url": "https://api.example.com/users",
+      "params": [
+        {
+          "key": "page",
+          "value": "1",
+          "enabled": true
+        },
+        {
+          "key": "limit",
+          "value": "50",
+          "enabled": false
+        }
+      ],
+      "headers": [
+        {
+          "key": "Accept",
+          "value": "application/json",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "inherit"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Create user",
+      "method": "POST",
+      "url": "https://api.example.com/users",
+      "auth": {
+        "kind": "basic",
+        "username": "admin",
+        "password": "s3cret"
+      },
+      "body": {
+        "type": "json",
+        "content": "{\n  \"name\": \"Ada\"\n}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Built binary / Fyne packages
+/yon
+*.app/
+*.exe
+*.AppImage
+
+# Coverage / profiling output
+*.out
+
+# Design exploration & alternate logo candidates (kept locally, not shipped)
+/assets/design/
+/assets/logo/archive/
+/assets/logo/yon[1-5].png
