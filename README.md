@@ -12,6 +12,10 @@ A single native binary for macOS, Windows, and Linux — no account, no cloud,
 no telemetry. Your work stays in plain files on your own disk.
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="Yon screenshot" width="860">
+</p>
+
 ---
 
 ## Why Yon

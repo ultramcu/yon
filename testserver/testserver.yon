@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "name": "Yon Test Server",
+  "auth": {
+    "kind": "bearer",
+    "token": "yon-demo-token"
+  },
+  "requests": [
+    {
+      "name": "GET — query params + custom header",
+      "method": "GET",
+      "url": "http://localhost:7878/get",
+      "params": [
+        {
+          "key": "page",
+          "value": "1",
+          "enabled": true
+        },
+        {
+          "key": "q",
+          "value": "hello",
+          "enabled": true
+        },
+        {
+          "key": "debug",
+          "value": "true",
+          "enabled": true
+        }
+      ],
+      "headers": [
+        {
+          "key": "X-Demo",
+          "value": "yon",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "POST — JSON body",
+      "method": "POST",
+      "url": "http://localhost:7878/post",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{\n  \"hello\": \"yon\",\n  \"n\": 42,\n  \"tags\": [\"http\", \"offline\"]\n}"
+      }
+    },
+    {
+      "name": "PUT — JSON body",
+      "method": "PUT",
+      "url": "http://localhost:7878/put",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{ \"id\": 7, \"name\": \"updated\" }"
+      }
+    },
+    {
+      "name": "DELETE",
+      "method": "DELETE",
+      "url": "http://localhost:7878/delete",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Bearer auth (inherits collection token)",
+      "method": "GET",
+      "url": "http://localhost:7878/bearer",
+      "auth": {
+        "kind": "inherit"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Basic auth (overrides collection)",
+      "method": "GET",
+      "url": "http://localhost:7878/basic-auth/alice/secret",
+      "auth": {
+        "kind": "basic",
+        "username": "alice",
+        "password": "secret"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Headers echo",
+      "method": "GET",
+      "url": "http://localhost:7878/headers",
+      "headers": [
+        {
+          "key": "X-Trace-Id",
+          "value": "abc-123",
+          "enabled": true
+        },
+        {
+          "key": "Accept",
+          "value": "application/json",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Status 404 (orange)",
+      "method": "GET",
+      "url": "http://localhost:7878/status/404",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Status 500 (red)",
+      "method": "GET",
+      "url": "http://localhost:7878/status/500",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Redirect → /get (follows)",
+      "method": "GET",
+      "url": "http://localhost:7878/redirect",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Large body (\u003e 256 KB, truncates)",
+      "method": "GET",
+      "url": "http://localhost:7878/large",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Slow 10s (test Cancel / timeout)",
+      "method": "GET",
+      "url": "http://localhost:7878/slow",
+      "params": [
+        {
+          "key": "seconds",
+          "value": "10",
+          "enabled": true
+        }
+      ],
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "Pretty JSON (syntax colour)",
+      "method": "GET",
+      "url": "http://localhost:7878/json",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    }
+  ]
+}
