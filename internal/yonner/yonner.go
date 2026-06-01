@@ -3,7 +3,7 @@
 // sends it, and produces a model.Response.
 //
 // It depends only on the standard library and internal/model. It never imports
-// Fyne or any UI package (ADR-0002), so it is pure, testable Go that could also
+// Fyne or any UI package (the UI-free-core rule), so it is pure, testable Go that could also
 // back a future CLI.
 package yonner
 

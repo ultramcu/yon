@@ -12,14 +12,14 @@ import (
 // Blind Test author #1 (Dev-Rabbit). Independent tests for the virtualized
 // large-Pretty-body viewer (widget.List path) added by the perf fix.
 //
-// EXPECTED behaviour is derived from SCOPE.md / CONTEXT.md / ADR-0001 and the
+// EXPECTED behaviour is derived from the documented design / the read-only-response rule and the
 // documented design:
 //   - Pretty mode, displayed text > largeBodyThreshold (64 KB) -> List viewer
 //     (bodyList visible; bodyGrid/bodyScroll hidden); bodyLines == pretty lines.
 //   - Small Pretty bodies and ALL Raw bodies keep the TextGrid.
 //   - maxDisplayBytes (256 KB) truncation + notice + Save button + full-body
 //     retention apply on BOTH paths.
-//   - Read-only monospace Labels (ADR-0001).
+//   - Read-only monospace Labels (the read-only-response rule).
 //
 // Pretty line count is computed independently via the documented prettyJSON()
 // signature, NOT by reading the viewer's rendering logic.

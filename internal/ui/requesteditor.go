@@ -167,7 +167,7 @@ func newRequestTab(w *Window, idx int) *requestTab {
 }
 
 // buildBody constructs the Body sub-tab: a type Select plus a multiline Entry
-// (editing input may use an Entry per ADR-0001). The editor is hidden for None.
+// (editing input may use an Entry per the read-only-response rule). The editor is hidden for None.
 func (rt *requestTab) buildBody(req model.Request) fyne.CanvasObject {
 	rt.bodyEntry = widget.NewMultiLineEntry()
 	rt.bodyEntry.SetText(req.Body.Content)

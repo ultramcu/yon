@@ -11,7 +11,7 @@ import (
 
 // These tests cover the large-body Pretty path that renders into the lightweight
 // read-only widget.List instead of the per-cell TextGrid (Optimizer #5). They
-// assert the ADR-0001 contract still holds (read-only, monospace, scrollable),
+// assert the the read-only-response rule contract still holds (read-only, monospace, scrollable),
 // that truncation is still signalled and the full body retained for Save, and
 // that the two Body viewers swap correctly between large and small bodies.
 

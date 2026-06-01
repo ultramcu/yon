@@ -11,7 +11,7 @@ import (
 )
 
 // Blind Test author #2 — independent verification of the v2 "Dark Pro" RESPONSE
-// layout derived from assets/design/mockup-v2.png + ADR-0001.
+// layout derived from assets/design/mockup-v2.png + the read-only-response rule.
 //
 // Expectations from the mockup/brief:
 //   - A small valid JSON body renders via the coloured TextGrid (bodyGrid shown
@@ -20,7 +20,7 @@ import (
 //   - A Pretty body whose rendered text is >= largeBodyThreshold renders via the
 //     virtualized widget.List (bodyList shown, bodyScroll hidden) — the perf path.
 //   - A >256 KB body keeps the truncation notice + Save button and retains the
-//     full body in memory (ADR-0001).
+//     full body in memory (the read-only-response rule).
 //   - The status pill colour tracks statusColor(code): 2xx/4xx/5xx classes, and
 //     the status text reads e.g. "200 OK".
 //   - No panic across small / large / error / pending states and Pretty<->Raw.
@@ -266,7 +266,7 @@ func TestBT2_Truncation_OverCapKeepsNoticeSaveAndFullBody(t *testing.T) {
 	if !rv.saveBtn.Visible() {
 		t.Error("over-cap body: Save-to-file button should be visible")
 	}
-	// CRITICAL ADR-0001 guarantee: full body retained even though display is capped.
+	// CRITICAL the read-only-response rule guarantee: full body retained even though display is capped.
 	if len(rv.fullBody) != len(full) {
 		t.Errorf("over-cap body: fullBody=%d, want full %d retained", len(rv.fullBody), len(full))
 	}

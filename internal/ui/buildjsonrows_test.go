@@ -21,7 +21,7 @@ import (
 // reproduce the input text exactly, multi-byte runes stay aligned, and a small
 // coloured body renders through the TextGrid path (not the List).
 //
-// These tests derive expectations from CONTEXT.md / SCOPE.md / ADR-0001 and the
+// These tests derive expectations from the documented design / the read-only-response rule and the
 // package colour constants — not from reading buildJSONRows' implementation.
 // ---------------------------------------------------------------------------
 

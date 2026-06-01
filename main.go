@@ -1,7 +1,7 @@
 // Command yon is a minimal, cross-platform desktop GUI for testing HTTP APIs:
 // a lightweight, fast, offline, open-source client built in Go + Fyne.
 //
-// main wires the Fyne app to the ui controller and nothing else: per ADR-0002
+// main wires the Fyne app to the ui controller and nothing else: per the UI-free-core rule
 // only main and internal/ui import Fyne. The ui controller restores the previous
 // Session (open Collections + their Tabs) on launch and saves it on shutdown.
 package main

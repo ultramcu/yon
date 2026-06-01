@@ -3,7 +3,7 @@
 // pure logic (auth inheritance, display-name derivation).
 //
 // It depends only on the standard library and imports neither Fyne nor any
-// networking package (see ADR-0002). The store package serializes these types
+// networking package (see the UI-free-core rule). The store package serializes these types
 // to .yon files with encoding/json, so the JSON struct tags here define the
 // on-disk schema and must stay stable.
 package model

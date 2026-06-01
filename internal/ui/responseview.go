@@ -21,7 +21,7 @@ import (
 
 // maxDisplayBytes caps how much of a response body is rendered on screen. Larger
 // bodies show only the head plus a notice and a "Save to file" button; the full
-// body is retained in memory (ADR-0001).
+// body is retained in memory (the read-only-response rule).
 const maxDisplayBytes = 256 * 1024
 
 // largeBodyThreshold is the display-text size at or above which the coloured
@@ -31,7 +31,7 @@ const maxDisplayBytes = 256 * 1024
 // into a lighter, virtualized read-only monospace widget.List instead (one
 // Label per visible line; off-screen lines are never laid out). Smaller bodies
 // keep the coloured TextGrid path. The split is "small body = coloured TextGrid,
-// large body = lightweight read-only line list" and stays read-only per ADR-0001.
+// large body = lightweight read-only line list" and stays read-only per the read-only-response rule.
 const largeBodyThreshold = 64 * 1024
 
 // Status-class colours for the status label.
@@ -52,7 +52,7 @@ var (
 
 // responseView renders a model.Response read-only: a status/time/size line, a
 // response-headers list, and the body in a read-only TextGrid (never an Entry,
-// ADR-0001) with a Pretty/Raw toggle (Pretty default).
+// the read-only-response rule) with a Pretty/Raw toggle (Pretty default).
 type responseView struct {
 	parent fyne.Window
 
@@ -82,7 +82,7 @@ type responseView struct {
 	statusPill   *fyne.Container
 
 	// bodyList is the lightweight read-only viewer used for large bodies instead
-	// of the per-cell TextGrid (ADR-0001: still read-only, monospace, scrollable).
+	// of the per-cell TextGrid (the read-only-response rule: still read-only, monospace, scrollable).
 	// It is virtualized — only on-screen lines are realised into a widget.
 	bodyList  *widget.List
 	bodyLines []string
@@ -373,7 +373,7 @@ func (rv *responseView) renderBody() {
 		// Render into the lightweight virtualized List instead: only the on-screen
 		// lines become widgets, so cost is independent of body size. Syntax colour
 		// is dropped on this path (the trade-off); the view stays read-only,
-		// monospace and scrollable per ADR-0001. Raw mode keeps the plain TextGrid
+		// monospace and scrollable per the read-only-response rule. Raw mode keeps the plain TextGrid
 		// so a user can opt back into the exact-bytes grid view.
 		rv.showLargeBody(display)
 	} else {

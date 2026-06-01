@@ -1,6 +1,6 @@
 // Package ui is Yon's Fyne front end: the only package besides main that
-// imports Fyne (ADR-0002). It renders Collections as windows, Requests as
-// DocTabs, and Responses in a read-only TextGrid (ADR-0001), translating
+// imports Fyne (the UI-free-core rule). It renders Collections as windows, Requests as
+// DocTabs, and Responses in a read-only TextGrid (the read-only-response rule), translating
 // between Fyne widgets and the pure model/yonner/store packages.
 package ui
 

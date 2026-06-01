@@ -17,7 +17,7 @@ func TestPrettyJSON_ValidObjectIsIndented(t *testing.T) {
 		t.Fatalf("prettyJSON reported failure on valid JSON")
 	}
 
-	// Per ADR-0001 / responseview: Pretty = indented JSON. Indented output must
+	// Per the read-only-response rule / responseview: Pretty = indented JSON. Indented output must
 	// (a) still be valid, equivalent JSON and (b) actually contain newlines +
 	// two-space indentation that the compact input lacked.
 	if !strings.Contains(string(out), "\n") {

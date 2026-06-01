@@ -9,7 +9,7 @@ import (
 	"github.com/ultramcu/yon/internal/model"
 )
 
-// The truncation boundary is exercised through responseView (ADR-0001):
+// The truncation boundary is exercised through responseView (the read-only-response rule):
 //   - body <= 256 KB  -> rendered whole, no truncation notice, save button hidden
 //   - body  > 256 KB  -> only the head (maxDisplayBytes) shown, notice + save shown,
 //                        full body retained for "Save to file".
@@ -22,11 +22,11 @@ import (
 // truncation behaviour is exercised here.
 
 // TestTruncation_BoundaryConstant pins the documented 256 KB display cap from
-// ADR-0001 / responseview.go. This is the only truncation fact reachable without
+// the read-only-response rule / responseview.go. This is the only truncation fact reachable without
 // constructing the (currently panicking) responseView.
 func TestTruncation_BoundaryConstant(t *testing.T) {
 	if maxDisplayBytes != 256*1024 {
-		t.Errorf("maxDisplayBytes = %d, want 256*1024 (ADR-0001 256 KB display cap)", maxDisplayBytes)
+		t.Errorf("maxDisplayBytes = %d, want 256*1024 (the read-only-response rule 256 KB display cap)", maxDisplayBytes)
 	}
 }
 

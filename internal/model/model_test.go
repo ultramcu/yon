@@ -11,7 +11,7 @@ import (
 // ---------------------------------------------------------------------------
 // ResolveAuth
 //
-// Spec (SCOPE.md / CONTEXT.md): ResolveAuth returns the Auth actually applied.
+// Spec (the documented design): ResolveAuth returns the Auth actually applied.
 //   - req Kind "inherit"            -> the Collection's Auth
 //   - req Kind "none"/"basic"/"bearer" -> the Request's own Auth
 //   - an explicit Request "none" overrides a Collection that has auth

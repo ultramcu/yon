@@ -6,7 +6,7 @@
 // format can be migrated forward without breaking older files. This package
 // validates that version on Load and refuses files written by a newer build.
 //
-// Per ADR-0002 this package is part of the UI-free core and must not import
+// Per the UI-free-core rule this package is part of the UI-free core and must not import
 // Fyne or any UI package.
 package store
 

@@ -120,9 +120,6 @@ The core is UI-free and fully testable; Fyne lives only in the front end.
 | `internal/store` | reads/writes `.yon` files |
 | `internal/ui` + `main.go` | the Fyne desktop UI (the only Fyne importers) |
 
-See [`CONTEXT.md`](CONTEXT.md) for the glossary, [`SCOPE.md`](SCOPE.md) for the v1
-scope, and [`docs/adr/`](docs/adr) for the key decisions.
-
 ## Roadmap (post-v1)
 
 Environments & variables · request history · collection folders · import from

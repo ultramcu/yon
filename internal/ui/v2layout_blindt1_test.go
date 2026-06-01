@@ -12,7 +12,7 @@ import (
 // Blind Test author #1 — independent verification of the v2 "Dark Pro" layout
 // (sidebar verb chips + collection-header count badge + Params/Headers sub-tab
 // count badges). Expectations are derived from assets/design/mockup-v2.png and
-// CONTEXT.md, not from reading the implementation's control flow. These tests
+// the spec, not from reading the implementation's control flow. These tests
 // are written to be FAIL-able: each asserts an observable property of the built
 // widgets.
 //
