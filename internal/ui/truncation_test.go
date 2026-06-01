@@ -50,8 +50,9 @@ func TestTruncation_SmallBodyRenderedWhole(t *testing.T) {
 	if rv.noticeLabel.Visible() {
 		t.Errorf("small body: truncation notice should be hidden")
 	}
-	if rv.saveBtn.Visible() {
-		t.Errorf("small body: Save-to-file button should be hidden")
+	// Save Output As… is available for any response (not only truncated ones).
+	if !rv.saveBtn.Visible() {
+		t.Errorf("small body: Save Output As… should still be available")
 	}
 }
 

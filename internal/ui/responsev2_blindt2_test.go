@@ -273,14 +273,15 @@ func TestBT2_Truncation_OverCapKeepsNoticeSaveAndFullBody(t *testing.T) {
 }
 
 // A small body must NOT show the truncation notice or Save button.
-func TestBT2_Truncation_SmallBodyHasNoNoticeOrSave(t *testing.T) {
+func TestBT2_Truncation_SmallBodyHasNoNotice(t *testing.T) {
 	rv := bt2View(t)
 	rv.setResponse(model.Response{Status: 200, StatusText: "OK", Body: []byte(`{"ok":true}`)})
 	if rv.noticeLabel.Visible() {
 		t.Error("small body: truncation notice should be hidden")
 	}
-	if rv.saveBtn.Visible() {
-		t.Error("small body: Save button should be hidden")
+	// Save Output As… is available for any response, truncated or not.
+	if !rv.saveBtn.Visible() {
+		t.Error("Save Output As… should be available for any response")
 	}
 }
 

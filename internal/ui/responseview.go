@@ -34,6 +34,11 @@ const maxDisplayBytes = 256 * 1024
 // large body = lightweight read-only line list" and stays read-only per the read-only-response rule.
 const largeBodyThreshold = 64 * 1024
 
+// maxPopoutBytes caps the body shown in the pop-out Textbox. A read-only Entry
+// renders ~128 KB responsively (~0.4 s); a larger Entry re-layouts slowly, so
+// bigger bodies show the head plus a notice and "Save Output As…" writes it all.
+const maxPopoutBytes = 128 * 1024
+
 // Status-class colours for the status label.
 var (
 	colorStatus2xx = color.NRGBA{R: 0x2e, G: 0x7d, B: 0x32, A: 0xff} // green
@@ -73,6 +78,8 @@ type responseView struct {
 
 	// copyBtn copies the response body to the clipboard (shown once there is one).
 	copyBtn *widget.Button
+	// popoutBtn opens the response body in a separate, resizable window.
+	popoutBtn *widget.Button
 
 	// Status pill: a rounded coloured rectangle with a small status-class dot
 	// behind the statusLabel text (mockup-v2 `.status-pill`). The pill background,
@@ -124,13 +131,20 @@ func newResponseView(parent fyne.Window) *responseView {
 	rv.prettyBtn.Importance = widget.HighImportance
 	rv.rawBtn.Importance = widget.MediumImportance
 
-	// Icon-only Copy (compact so the response bar's right cluster never clips).
+	// Icon-only Copy / Save / Pop-out (compact so the bar's right cluster never
+	// clips). All three are shown only once there is a response.
 	rv.copyBtn = widget.NewButtonWithIcon("", theme.ContentCopyIcon(), rv.copyBody)
 	rv.copyBtn.Importance = widget.LowImportance
 	rv.copyBtn.Hide()
 
-	rv.saveBtn = widget.NewButton("Save to file", rv.saveToFile)
+	// Save Output As… (native dialog) writes the full body to a chosen file.
+	rv.saveBtn = widget.NewButtonWithIcon("", theme.DocumentSaveIcon(), rv.saveToFile)
+	rv.saveBtn.Importance = widget.LowImportance
 	rv.saveBtn.Hide()
+
+	rv.popoutBtn = widget.NewButtonWithIcon("", theme.ViewFullScreenIcon(), rv.showPopout)
+	rv.popoutBtn.Importance = widget.LowImportance
+	rv.popoutBtn.Hide()
 
 	rv.noticeLabel = widget.NewLabel("")
 	rv.noticeLabel.Hide()
@@ -180,7 +194,7 @@ func newResponseView(parent fyne.Window) *responseView {
 	// Save (when truncated) · Copy · Pretty | Raw — a single flat row pinned right
 	// (adjacent Pretty/Raw buttons read as a segmented control).
 	right := container.New(layout.NewHBoxLayout(),
-		rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
+		rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
 	headerRow := container.NewBorder(nil, nil, left, right)
 
 	header := container.NewVBox(headerRow, rv.noticeLabel)
@@ -268,6 +282,7 @@ func (rv *responseView) setPending() {
 	rv.noticeLabel.Hide()
 	rv.saveBtn.Hide()
 	rv.copyBtn.Hide()
+	rv.popoutBtn.Hide()
 	rv.fullBody = nil
 	rv.clearBody()
 	rv.headersGrid.SetText("")
@@ -281,6 +296,7 @@ func (rv *responseView) setError(err error) {
 	rv.noticeLabel.Hide()
 	rv.saveBtn.Hide()
 	rv.copyBtn.Hide()
+	rv.popoutBtn.Hide()
 	rv.fullBody = nil
 	rv.clearBody()
 	rv.headersGrid.SetText("")
@@ -290,6 +306,8 @@ func (rv *responseView) setError(err error) {
 func (rv *responseView) setResponse(resp model.Response) {
 	rv.fullBody = resp.Body
 	rv.copyBtn.Show()
+	rv.saveBtn.Show()
+	rv.popoutBtn.Show()
 
 	rv.statusLabel.Text = fmt.Sprintf("%d %s", resp.Status, resp.StatusText)
 	rv.applyStatusPill(statusColor(resp.Status))
@@ -384,13 +402,11 @@ func (rv *responseView) renderBody() {
 
 	if truncated {
 		rv.noticeLabel.SetText(fmt.Sprintf(
-			"Showing first %s of %s — body truncated for display. Use “Save to file” for the full body.",
+			"Showing first %s of %s — body truncated for display. Use Save Output As… for the full body.",
 			formatSize(int64(maxDisplayBytes)), formatSize(int64(len(rv.fullBody)))))
 		rv.noticeLabel.Show()
-		rv.saveBtn.Show()
 	} else {
 		rv.noticeLabel.Hide()
-		rv.saveBtn.Hide()
 	}
 }
 
@@ -469,6 +485,58 @@ func (rv *responseView) saveToFileFyne() {
 			dialog.ShowError(werr, rv.parent)
 		}
 	}, rv.parent)
+}
+
+// showPopout opens the response body in a separate, resizable window — a big
+// read-only Textbox the user can scroll, select and copy from. The Entry content
+// is capped at maxPopoutBytes for responsiveness; the window's Save Output As…
+// button still writes the full body.
+func (rv *responseView) showPopout() {
+	if rv.fullBody == nil {
+		return
+	}
+	app := fyne.CurrentApp()
+	if app == nil {
+		return
+	}
+
+	full := len(rv.fullBody)
+	body := rv.fullBody
+	if full > maxPopoutBytes {
+		body = body[:maxPopoutBytes]
+	}
+	display := string(body)
+	if rv.pretty {
+		if indented, ok := prettyJSON(body); ok {
+			display = string(indented)
+		}
+	}
+
+	box := widget.NewMultiLineEntry()
+	box.Wrapping = fyne.TextWrapOff
+	box.SetText(display)
+
+	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+		app.Clipboard().SetContent(string(rv.fullBody))
+	})
+	saveBtn := widget.NewButtonWithIcon("Save Output As…", theme.DocumentSaveIcon(), rv.saveToFile)
+	buttons := container.NewHBox(copyBtn, saveBtn)
+
+	var head fyne.CanvasObject
+	if full > maxPopoutBytes {
+		notice := widget.NewLabel(fmt.Sprintf(
+			"Showing first %s of %s — use Save Output As… for the full body.",
+			formatSize(int64(maxPopoutBytes)), formatSize(int64(full))))
+		head = container.NewBorder(nil, nil, notice, buttons)
+	} else {
+		head = container.NewBorder(nil, nil, nil, buttons)
+	}
+
+	win := app.NewWindow("Response")
+	win.SetIcon(appIcon)
+	win.SetContent(container.NewBorder(head, nil, nil, nil, box))
+	win.Resize(fyne.NewSize(900, 720))
+	win.Show()
 }
 
 // statusColor maps an HTTP status code to its class colour.
