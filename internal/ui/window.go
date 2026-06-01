@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -79,6 +80,26 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	split.SetOffset(0.22)
 	w.win.SetContent(container.NewBorder(nil, w.buildStatusBar(), nil, nil, split))
 	w.updateStatusBar()
+
+	// Cmd/Ctrl+F opens find on the active response (also in Edit ▸ Find…); Esc
+	// closes it. These fire when focus is on the response area; the Edit menu and
+	// the find field's own handlers cover the cases where an Entry holds focus.
+	w.win.Canvas().AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyF, Modifier: fyne.KeyModifierShortcutDefault},
+		func(fyne.Shortcut) {
+			if rt := w.activeTab(); rt != nil {
+				rt.response.openFind()
+			}
+		},
+	)
+	w.win.Canvas().AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyEscape},
+		func(fyne.Shortcut) {
+			if rt := w.activeTab(); rt != nil {
+				rt.response.closeFind()
+			}
+		},
+	)
 	w.win.Resize(fyne.NewSize(1100, 720))
 
 	w.win.SetCloseIntercept(w.onCloseRequested)
@@ -302,13 +323,48 @@ func (w *Window) buildMenu() {
 		fyne.NewMenuItem("Save", func() { w.save(nil) }),
 		fyne.NewMenuItem("Save As…", func() { w.saveAs(nil) }),
 	)
+	// No keyboard accelerators on these items: on macOS a main-menu accelerator
+	// is registered app-globally and bound to this (main) window, so it would
+	// hijack Cmd+F / Cmd+C / Cmd+V from a focused pop-out window and act on the
+	// main window instead. The shortcuts are handled per-window instead — Cmd+F
+	// via each window's canvas/find-field, Cmd+C/V by the focused Entry itself —
+	// so these menu items provide discoverable, mouse-driven access.
+	editMenu := fyne.NewMenu("Edit",
+		fyne.NewMenuItem("Copy", w.editCopy),
+		fyne.NewMenuItem("Paste", w.editPaste),
+		fyne.NewMenuItemSeparator(),
+		fyne.NewMenuItem("Find…", w.openFindActive),
+	)
 	collMenu := fyne.NewMenu("Collection",
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 	)
 	appMenu := fyne.NewMenu("Yon",
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
 	)
-	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, collMenu, appMenu))
+	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, editMenu, collMenu, appMenu))
+}
+
+// openFindActive opens find on the active request's response (Edit ▸ Find…, Cmd/Ctrl+F).
+func (w *Window) openFindActive() {
+	if rt := w.activeTab(); rt != nil {
+		rt.response.openFind()
+	}
+}
+
+// editCopy / editPaste forward the clipboard action to the focused widget so the
+// Edit menu items act on whatever entry (URL, params, body, find…) has focus.
+func (w *Window) editCopy() {
+	w.dispatchShortcut(&fyne.ShortcutCopy{Clipboard: fyne.CurrentApp().Clipboard()})
+}
+
+func (w *Window) editPaste() {
+	w.dispatchShortcut(&fyne.ShortcutPaste{Clipboard: fyne.CurrentApp().Clipboard()})
+}
+
+func (w *Window) dispatchShortcut(s fyne.Shortcut) {
+	if f, ok := w.win.Canvas().Focused().(fyne.Shortcutable); ok {
+		f.TypedShortcut(s)
+	}
 }
 
 // open shows a native (OS) file picker filtered to *.yon and loads the chosen

@@ -34,9 +34,9 @@ const maxDisplayBytes = 256 * 1024
 // large body = lightweight read-only line list" and stays read-only per the read-only-response rule.
 const largeBodyThreshold = 64 * 1024
 
-// maxPopoutBytes caps the body shown in the pop-out Textbox. A read-only Entry
-// renders ~128 KB responsively (~0.4 s); a larger Entry re-layouts slowly, so
-// bigger bodies show the head plus a notice and "Save Output As…" writes it all.
+// maxPopoutBytes caps the body shown in the pop-out window. Its default view is a
+// selectable Entry, which re-layouts slowly past ~128 KB (~0.4 s); larger bodies
+// show the head plus a notice, and "Save Output As…" still writes the full body.
 const maxPopoutBytes = 128 * 1024
 
 // Status-class colours for the status label.
@@ -80,6 +80,12 @@ type responseView struct {
 	copyBtn *widget.Button
 	// popoutBtn opens the response body in a separate, resizable window.
 	popoutBtn *widget.Button
+
+	// find is the in-pane text-search bar (Cmd/Ctrl+F). While open, the body is
+	// shown in the TextGrid and search drives the match highlighting.
+	find       *findBar
+	search     gridSearch
+	findActive bool
 
 	// Status pill: a rounded coloured rectangle with a small status-class dot
 	// behind the statusLabel text (mockup-v2 `.status-pill`). The pill background,
@@ -197,7 +203,14 @@ func newResponseView(parent fyne.Window) *responseView {
 		rv.popoutBtn, rv.saveBtn, rv.copyBtn, rv.prettyBtn, rv.rawBtn)
 	headerRow := container.NewBorder(nil, nil, left, right)
 
-	header := container.NewVBox(headerRow, rv.noticeLabel)
+	rv.find = newFindBar(
+		func(q string) { c, t := rv.search.search(q); rv.find.setCount(c, t) },
+		func() { c, t := rv.search.move(1); rv.find.setCount(c, t) },
+		func() { c, t := rv.search.move(-1); rv.find.setCount(c, t) },
+		rv.closeFind,
+	)
+
+	header := container.NewVBox(headerRow, rv.noticeLabel, rv.find.container)
 
 	// Body content: the coloured TextGrid (small bodies, scrolled) stacked with
 	// the lightweight List (large bodies). renderBody shows exactly one. UNCHANGED
@@ -272,6 +285,53 @@ func (rv *responseView) copyBody() {
 	if app := fyne.CurrentApp(); app != nil {
 		app.Clipboard().SetContent(string(data))
 	}
+}
+
+// openFind shows the search bar over the response body. While find is open the
+// body is rendered (plain) into the TextGrid so matches can be highlighted; the
+// normal view (colour / virtualized list) is restored when find closes.
+func (rv *responseView) openFind() {
+	if rv.fullBody == nil {
+		return
+	}
+	rv.findActive = true
+	text := rv.findDisplayText()
+	rv.bodyList.Hide()
+	rv.bodyGrid.SetText(text)
+	rv.bodyScroll.Show()
+	rv.search.bind(rv.bodyGrid, rv.bodyScroll, text, func() { rv.bodyGrid.SetText(text) })
+
+	rv.find.container.Show()
+	rv.find.container.Refresh()
+	rv.parent.Canvas().Focus(rv.find.query)
+	c, t := rv.search.search(rv.find.query.Text)
+	rv.find.setCount(c, t)
+}
+
+// closeFind hides the search bar, clears highlights, and restores the normal
+// response view.
+func (rv *responseView) closeFind() {
+	if !rv.findActive {
+		return
+	}
+	rv.findActive = false
+	rv.find.container.Hide()
+	rv.search.clear()
+	rv.renderBody()
+}
+
+// findDisplayText is the (capped, pretty-if-JSON) body text that find searches.
+func (rv *responseView) findDisplayText() string {
+	body := rv.fullBody
+	if len(body) > maxDisplayBytes {
+		body = body[:maxDisplayBytes]
+	}
+	if rv.pretty {
+		if indented, ok := prettyJSON(body); ok {
+			return string(indented)
+		}
+	}
+	return string(body)
 }
 
 // setPending shows an in-flight indicator while a send runs.
@@ -487,10 +547,11 @@ func (rv *responseView) saveToFileFyne() {
 	}, rv.parent)
 }
 
-// showPopout opens the response body in a separate, resizable window — a big
-// read-only Textbox the user can scroll, select and copy from. The Entry content
-// is capped at maxPopoutBytes for responsiveness; the window's Save Output As…
-// button still writes the full body.
+// showPopout opens the response body in a separate, resizable window. Its default
+// view is a selectable Textbox the user can drag-select and copy from; pressing
+// Cmd/Ctrl+F swaps it for a TextGrid that highlights matches (Entry cannot
+// highlight ranges) and reveals the find bar, and Esc swaps back. The body is
+// capped at maxPopoutBytes for responsiveness; Save Output As… writes it all.
 func (rv *responseView) showPopout() {
 	if rv.fullBody == nil {
 		return
@@ -505,16 +566,54 @@ func (rv *responseView) showPopout() {
 	if full > maxPopoutBytes {
 		body = body[:maxPopoutBytes]
 	}
-	display := string(body)
+	text := string(body)
 	if rv.pretty {
 		if indented, ok := prettyJSON(body); ok {
-			display = string(indented)
+			text = string(indented)
 		}
 	}
 
-	box := widget.NewMultiLineEntry()
-	box.Wrapping = fyne.TextWrapOff
-	box.SetText(display)
+	// Default view: a selectable Textbox (drag-select + copy). It intercepts
+	// Cmd/Ctrl+F itself so find opens even while the Textbox holds focus.
+	entry := newShortcutEntry(true)
+	entry.SetText(text)
+
+	// Find view: a TextGrid that supports match highlighting, shown only while
+	// find is open. It overlays the entry in a Stack; one is hidden at a time.
+	grid := widget.NewTextGrid()
+	gridScroll := container.NewVScroll(grid)
+	gridScroll.Hide()
+
+	var search gridSearch
+	search.bind(grid, gridScroll, text, func() { grid.SetText(text) })
+
+	win := app.NewWindow("Response")
+	win.SetIcon(appIcon)
+
+	var find *findBar
+	openFind := func() {
+		entry.Hide()
+		grid.SetText(text)
+		gridScroll.Show()
+		find.container.Show()
+		find.container.Refresh()
+		win.Canvas().Focus(find.query)
+		c, t := search.search(find.query.Text)
+		find.setCount(c, t)
+	}
+	closeFind := func() {
+		find.container.Hide()
+		search.clear()
+		gridScroll.Hide()
+		entry.Show()
+	}
+	find = newFindBar(
+		func(q string) { c, t := search.search(q); find.setCount(c, t) },
+		func() { c, t := search.move(1); find.setCount(c, t) },
+		func() { c, t := search.move(-1); find.setCount(c, t) },
+		closeFind,
+	)
+	entry.onFind = openFind
 
 	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
 		app.Clipboard().SetContent(string(rv.fullBody))
@@ -522,20 +621,21 @@ func (rv *responseView) showPopout() {
 	saveBtn := widget.NewButtonWithIcon("Save Output As…", theme.DocumentSaveIcon(), rv.saveToFile)
 	buttons := container.NewHBox(copyBtn, saveBtn)
 
-	var head fyne.CanvasObject
+	var bar fyne.CanvasObject
 	if full > maxPopoutBytes {
 		notice := widget.NewLabel(fmt.Sprintf(
 			"Showing first %s of %s — use Save Output As… for the full body.",
 			formatSize(int64(maxPopoutBytes)), formatSize(int64(full))))
-		head = container.NewBorder(nil, nil, notice, buttons)
+		bar = container.NewBorder(nil, nil, notice, buttons)
 	} else {
-		head = container.NewBorder(nil, nil, nil, buttons)
+		bar = container.NewBorder(nil, nil, nil, buttons)
 	}
 
-	win := app.NewWindow("Response")
-	win.SetIcon(appIcon)
-	win.SetContent(container.NewBorder(head, nil, nil, nil, box))
-	win.Resize(fyne.NewSize(900, 720))
+	stack := container.NewStack(entry, gridScroll)
+	win.SetContent(container.NewBorder(
+		container.NewVBox(bar, find.container), nil, nil, nil, stack))
+	win.Resize(fyne.NewSize(960, 720))
+	addFindShortcuts(win, openFind, closeFind)
 	win.Show()
 }
 
