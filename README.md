@@ -27,7 +27,7 @@ does the everyday job — fire a request, read the response — and gets out of 
 
 The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you catch a response.
 
-## Features (v1)
+## Features
 
 - **Methods:** GET · POST · PUT · DELETE
 - **Query parameters** and **headers** as toggleable key/value tables
@@ -36,10 +36,17 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 - **Body:** None · JSON (auto `Content-Type` + pretty) · Text
 - **Response viewer:** status · time · size · headers, with a **Pretty** (indented,
   JSON syntax-coloured) / **Raw** toggle and one-click **Copy**; huge bodies render
-  fast (virtualized) and are capped on screen with a *Save to file* escape hatch
-- **Send / Cancel** any in-flight request
+  fast (virtualized) and are capped on screen with a *Save Output As…* escape hatch
+- **Find in response (⌘F / Ctrl+F):** search the body with match highlighting, a
+  match counter, next/previous navigation, and Esc to close
+- **Pop-out window** (⤢): open a response in its own resizable window — drag-select
+  and copy text, **Save Output As…** for the full body, or search with highlighting
+- **Copy as cURL:** turn any request into a ready-to-run `curl` command
+- **Send / Cancel** any in-flight request — or press **Enter** in the URL bar to send
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
-  tab per request; your open collections and tabs are restored on the next launch
+  tab per request; native OS open/save dialogs with **Save** / **Save As**, plus
+  **Open Recent**. Your open collections and tabs are restored on the next launch
+- **Edit menu:** Copy · Paste · Find…
 - **Themes:** Dark Pro / Warm / System, switchable in Settings
 - **Connection settings:** request timeout, follow redirects, system proxy support,
   and an *Allow insecure TLS* toggle for self-signed dev APIs
@@ -123,8 +130,7 @@ The core is UI-free and fully testable; Fyne lives only in the front end.
 ## Roadmap (post-v1)
 
 Environments & variables · request history · collection folders · import from
-OpenAPI and `.http` files · form-data & multipart bodies · copy-as-curl ·
-pre-request scripts.
+OpenAPI and `.http` files · form-data & multipart bodies · pre-request scripts.
 
 ## License
 
