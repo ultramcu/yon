@@ -46,6 +46,8 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
   tab per request; native OS open/save dialogs with **Save** / **Save As**, plus
   **Open Recent**. Your open collections and tabs are restored on the next launch
+- **Import Collection (JSON):** bring in requests from a Collection v2.1 JSON export —
+  folders are flattened into request names and anything Yon can't represent is reported
 - **Edit menu:** Copy · Paste · Find…
 - **Themes:** Dark Pro / Warm / System, switchable in Settings
 - **Connection settings:** request timeout, follow redirects, system proxy support,

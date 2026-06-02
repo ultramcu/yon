@@ -327,6 +327,7 @@ func (w *Window) buildMenu() {
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("New", func() { w.app.NewCollectionWindow() }),
 		fyne.NewMenuItem("Open…", w.open),
+		fyne.NewMenuItem("Import Collection (JSON)…", w.importCollection),
 		w.recentMenuItem(),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Save", func() { w.save(nil) }),
@@ -347,12 +348,18 @@ func (w *Window) buildMenu() {
 	collMenu := fyne.NewMenu("Collection",
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 	)
-	appMenu := fyne.NewMenu("Yon",
-		fyne.NewMenuItem("About Yon", func() { w.app.showAboutDialog(w.win) }),
-		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
+	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
+	// system application menu (the one named after the app) — and "About" replaces
+	// the default About entry — so they appear where macOS users expect, with no
+	// duplicate. "Check for Updates…" is not a recognised special label, so Fyne
+	// leaves it here in the Help menu. On Windows/Linux there is no application
+	// menu, so all three items simply show under Help.
+	helpMenu := fyne.NewMenu("Help",
+		fyne.NewMenuItem("About", func() { w.app.showAboutDialog(w.win) }),
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
+		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
 	)
-	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, editMenu, collMenu, appMenu))
+	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, editMenu, collMenu, helpMenu))
 }
 
 // openFindActive opens find on the active request's response (Edit ▸ Find…, Cmd/Ctrl+F).

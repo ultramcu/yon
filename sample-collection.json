@@ -1,0 +1,69 @@
+{
+  "info": {
+    "name": "Sample API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "COLLECTION_TOKEN" }] },
+  "item": [
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "https://api.example.com/users?page=1&active=true",
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "active", "value": "true", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ada Lovelace\",\n  \"role\": \"admin\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "https://api.example.com/users" }
+          }
+        },
+        {
+          "name": "Patch user",
+          "request": {
+            "method": "PATCH",
+            "url": { "raw": "https://api.example.com/users/1" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "auth": {
+          "type": "basic",
+          "basic": [
+            { "key": "username", "value": "admin" },
+            { "key": "password", "value": "s3cret" }
+          ]
+        },
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [{ "key": "grant_type", "value": "password" }]
+        },
+        "url": {
+          "raw": "https://api.example.com/login?next={{base_url}}/home",
+          "query": [{ "key": "next", "value": "{{base_url}}/home" }]
+        }
+      }
+    }
+  ]
+}

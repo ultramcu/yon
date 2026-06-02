@@ -25,13 +25,19 @@ var buildVersion string
 
 // currentVersion is the running build's version: the ldflags override if set,
 // otherwise the FyneApp.toml version embedded by `fyne package`. Empty for plain
-// `go run` / `go build` dev builds.
+// `go run` / `go build` dev builds, so the update check stays quiet on them.
 func currentVersion() string {
 	if buildVersion != "" {
 		return buildVersion
 	}
 	if app := fyne.CurrentApp(); app != nil {
-		return app.Metadata().Version
+		v := app.Metadata().Version
+		// Fyne reports "0.0.1" for un-packaged (`go run` / `go build`) builds;
+		// treat that placeholder as "no version" so dev builds don't claim to be
+		// out of date against the latest release.
+		if v != "" && v != "0.0.1" {
+			return v
+		}
 	}
 	return ""
 }
