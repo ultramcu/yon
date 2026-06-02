@@ -50,6 +50,9 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 - **Themes:** Dark Pro / Warm / System, switchable in Settings
 - **Connection settings:** request timeout, follow redirects, system proxy support,
   and an *Allow insecure TLS* toggle for self-signed dev APIs
+- **Updates:** a manual *Check for Updates…* (plus an opt-in startup check, **off by
+  default**) that finds a newer GitHub release and downloads the build for your OS to
+  your Downloads folder — no telemetry, it only reaches the network when you ask
 
 ## Install
 

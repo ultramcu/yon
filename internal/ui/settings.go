@@ -16,6 +16,7 @@ const (
 	prefKeyTimeoutSeconds = "settings.timeoutSeconds"
 	prefKeyInsecureTLS    = "settings.insecureTLS"
 	prefKeyThemeID        = "settings.themeID"
+	prefKeyCheckUpdates   = "settings.checkUpdatesOnLaunch"
 )
 
 // defaultTimeout is used when no timeout preference has been stored yet.
@@ -28,6 +29,10 @@ type Settings struct {
 	Timeout     time.Duration
 	InsecureTLS bool
 	ThemeID     string
+	// CheckUpdatesOnLaunch opts in to a one-shot background update check on
+	// startup. Off by default to honour Yon's offline / no-telemetry promise; a
+	// manual "Check for Updates…" is always available regardless of this flag.
+	CheckUpdatesOnLaunch bool
 }
 
 // loadSettings reads the Settings from Preferences, falling back to the v1
@@ -38,9 +43,10 @@ func loadSettings(p fyne.Preferences) Settings {
 		secs = int(defaultTimeout / time.Second)
 	}
 	return Settings{
-		Timeout:     time.Duration(secs) * time.Second,
-		InsecureTLS: p.BoolWithFallback(prefKeyInsecureTLS, false),
-		ThemeID:     p.StringWithFallback(prefKeyThemeID, defaultThemeID),
+		Timeout:              time.Duration(secs) * time.Second,
+		InsecureTLS:          p.BoolWithFallback(prefKeyInsecureTLS, false),
+		ThemeID:              p.StringWithFallback(prefKeyThemeID, defaultThemeID),
+		CheckUpdatesOnLaunch: p.BoolWithFallback(prefKeyCheckUpdates, false),
 	}
 }
 
@@ -49,6 +55,7 @@ func (s Settings) save(p fyne.Preferences) {
 	p.SetInt(prefKeyTimeoutSeconds, int(s.Timeout/time.Second))
 	p.SetBool(prefKeyInsecureTLS, s.InsecureTLS)
 	p.SetString(prefKeyThemeID, s.ThemeID)
+	p.SetBool(prefKeyCheckUpdates, s.CheckUpdatesOnLaunch)
 }
 
 // options converts the Settings into yonner.Options for a send. FollowRedirects
@@ -78,6 +85,9 @@ func (a *App) showSettingsDialog(parent fyne.Window) {
 	insecureCheck := widget.NewCheck("", nil)
 	insecureCheck.SetChecked(a.settings.InsecureTLS)
 
+	updatesCheck := widget.NewCheck("Check GitHub for a newer release on startup", nil)
+	updatesCheck.SetChecked(a.settings.CheckUpdatesOnLaunch)
+
 	themeSelect := widget.NewSelect(themeNames(), nil)
 	themeSelect.SetSelected(themeNameByID(a.settings.ThemeID))
 
@@ -85,6 +95,7 @@ func (a *App) showSettingsDialog(parent fyne.Window) {
 		widget.NewFormItem("Appearance", themeSelect),
 		widget.NewFormItem("Timeout (seconds)", timeoutEntry),
 		widget.NewFormItem("Allow insecure TLS", insecureCheck),
+		widget.NewFormItem("Updates", updatesCheck),
 	}
 
 	dialog.ShowForm("Settings", "Save", "Cancel", items, func(ok bool) {
@@ -98,6 +109,7 @@ func (a *App) showSettingsDialog(parent fyne.Window) {
 		a.settings.Timeout = time.Duration(secs) * time.Second
 		a.settings.InsecureTLS = insecureCheck.Checked
 		a.settings.ThemeID = themeIDByName(themeSelect.Selected)
+		a.settings.CheckUpdatesOnLaunch = updatesCheck.Checked
 		a.settings.save(a.prefs())
 		a.applyTheme() // recolour the whole app immediately
 	}, parent)

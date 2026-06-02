@@ -17,6 +17,7 @@ import (
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/store"
+	"github.com/ultramcu/yon/internal/updater"
 )
 
 // Window hosts exactly one model.Collection: a sidebar listing its Requests and
@@ -54,6 +55,14 @@ type Window struct {
 	// openTabs maps a Collection request index to its open editor Tab, so we
 	// don't open the same Request twice and can find a Tab to refresh/select.
 	openTabs map[int]*requestTab
+
+	// updateBanner is a dismissible notice shown at the top of the window when a
+	// newer release is found; updateLabel is its text, and pendingRel/pendingAsset
+	// hold the release whose asset the Download button fetches.
+	updateBanner *fyne.Container
+	updateLabel  *widget.Label
+	pendingRel   updater.Release
+	pendingAsset updater.Asset
 }
 
 // newWindow builds (but does not Show) a Window for coll. path is "" for an
@@ -78,7 +87,7 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 		w.tabs,
 	)
 	split.SetOffset(0.22)
-	w.win.SetContent(container.NewBorder(nil, w.buildStatusBar(), nil, nil, split))
+	w.win.SetContent(container.NewBorder(w.buildUpdateBanner(), w.buildStatusBar(), nil, nil, split))
 	w.updateStatusBar()
 
 	// Cmd/Ctrl+F opens find on the active response (also in Edit ▸ Find…); Esc
@@ -339,6 +348,7 @@ func (w *Window) buildMenu() {
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 	)
 	appMenu := fyne.NewMenu("Yon",
+		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
 	)
 	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, editMenu, collMenu, appMenu))

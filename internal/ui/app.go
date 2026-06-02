@@ -78,7 +78,21 @@ func (a *App) Run(files ...string) {
 		a.NewCollectionWindow()
 	}
 
+	if a.settings.CheckUpdatesOnLaunch {
+		a.autoCheckUpdates()
+	}
+
 	a.fyneApp.Run()
+}
+
+// autoCheckUpdates runs a one-shot background update check against any open
+// window's banner (one notice is enough). Called only when the user has opted in
+// via Settings.
+func (a *App) autoCheckUpdates() {
+	for w := range a.windows {
+		w.checkForUpdates(false)
+		return
+	}
 }
 
 // OpenPath loads a Collection from a .yon file and opens it in its own window.
