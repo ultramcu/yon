@@ -348,6 +348,7 @@ func (w *Window) buildMenu() {
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 	)
 	appMenu := fyne.NewMenu("Yon",
+		fyne.NewMenuItem("About Yon", func() { w.app.showAboutDialog(w.win) }),
 		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
 	)
