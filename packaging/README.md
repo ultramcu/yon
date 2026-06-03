@@ -46,6 +46,27 @@ Installs `application-x-yon.xml` (defines `application/x-yon`, glob `*.yon`) and
 `yon.desktop` (`Exec=yon %F`) under `~/.local/share`, then refreshes the MIME and
 desktop databases. Make sure `yon` is on `PATH` (e.g. `~/.local/bin/yon`).
 
+## Cutting a release
+
+The release is kept a **draft** until every platform's asset is uploaded, then
+auto-published — so an in-app update check never sees a version it can't yet
+download. Steps:
+
+1. Bump `FyneApp.toml` (Version + Build), commit `Release vX.Y.Z`, push `main`.
+2. Create the **draft** release with notes (this does *not* create the tag yet):
+   ```sh
+   gh release create vX.Y.Z --draft --target main --title "Yon vX.Y.Z" --notes-file notes.md
+   ```
+3. Push the tag to trigger the build:
+   ```sh
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+4. `release.yml` builds all three platforms, attaches each asset to the draft
+   (`draft: true`), and the `publish` job flips the release to public once all
+   builds succeed. If any platform fails, the release stays a draft.
+
+> After the first run, confirm the published release kept the notes from step 2.
+
 ## Known limitations (verify on a real install)
 
 These can't be exercised by `go test` — they need a packaged, OS-registered app —

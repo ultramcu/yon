@@ -96,7 +96,27 @@ jobs:
             linux)   mv Yon.tar.xz "dist/Yon-${GITHUB_REF_NAME}-linux.tar.xz" ;;
           esac
 
-      - name: Attach to release
+      # Upload this platform's asset but keep the release a DRAFT: each matrix job
+      # attaches its own file, and the release must not go public until all three
+      # are present (otherwise an in-app update check during the build sees the
+      # new version with no downloadable asset for its OS). draft: true also
+      # prevents the first finishing job from publishing a half-built release.
+      - name: Attach to draft release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
+          draft: true
+
+  # Publish the release only after all platform builds succeeded and uploaded
+  # their assets, so users never see a version they can't download yet.
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Flip the release from draft to public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --repo "${GITHUB_REPOSITORY}"
