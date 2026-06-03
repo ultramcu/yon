@@ -82,12 +82,22 @@ func (w *Window) buildUpdateBanner() fyne.CanvasObject {
 // silent unless there is something to download.
 func (w *Window) checkForUpdates(manual bool) {
 	cur := currentVersion()
+	// A manual check hits the network for up to CheckTimeout; show a progress
+	// indicator so the menu item doesn't just "do nothing". An automatic startup
+	// check stays silent. progress is nil for the silent path.
+	var progress dialog.Dialog
+	if manual {
+		progress = w.showCheckingDialog()
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), updater.CheckTimeout)
 		defer cancel()
 		rel, err := updater.Latest(ctx)
 
 		fyne.Do(func() {
+			if progress != nil {
+				progress.Hide()
+			}
 			if err != nil {
 				if manual {
 					dialog.ShowError(fmt.Errorf("couldn't check for updates: %w", err), w.win)
@@ -97,6 +107,15 @@ func (w *Window) checkForUpdates(manual bool) {
 			w.applyUpdateResult(cur, rel, manual)
 		})
 	}()
+}
+
+// showCheckingDialog shows a modal "Checking for updates…" progress indicator and
+// returns it so the caller can Hide() it once the check completes. Split out so
+// the indicator is unit-testable without the network goroutine.
+func (w *Window) showCheckingDialog() dialog.Dialog {
+	d := dialog.NewCustomWithoutButtons("Checking for updates…", widget.NewProgressBarInfinite(), w.win)
+	d.Show()
+	return d
 }
 
 // applyUpdateResult is the synchronous decision for a fetched release: reveal the
