@@ -35,6 +35,29 @@ func TestToCurl_FullRequest(t *testing.T) {
 	}
 }
 
+// TestToCurl_UnresolvedTemplatesStayReadable pins that {{variable}} templates
+// that are NOT resolved (no environment / unknown var) stay literal in the
+// copied curl instead of being percent-encoded to %7B%7B…%7D%7D — both in the
+// URL path and in query params. Regression test for the curl window showing
+// "%7B%7Bserver%7D%7D/usage?account=%7B%7Baccount%7D%7D".
+func TestToCurl_UnresolvedTemplatesStayReadable(t *testing.T) {
+	req := model.Request{
+		Method: model.MethodGet,
+		URL:    "{{server}}/usage",
+		Params: []model.Param{{Key: "account", Value: "{{account}}", Enabled: true}},
+	}
+	got := ToCurl(req, model.Collection{}, Options{}) // nil resolver: templates left literal
+
+	if strings.Contains(got, "%7B") || strings.Contains(got, "%7b") {
+		t.Fatalf("template braces were percent-encoded:\n%s", got)
+	}
+	for _, want := range []string{"{{server}}/usage", "account={{account}}"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestToCurl_BasicAuthQuotingAndGet(t *testing.T) {
 	req := model.Request{
 		Method: model.MethodGet,

@@ -87,6 +87,10 @@ type requestTab struct {
 
 	response *responseView
 
+	// syncing guards the two-way URL⇄Params mirror against feedback loops: while
+	// one side is rewriting the other, the reverse handler is a no-op.
+	syncing bool
+
 	// dirty marks this tab as having unsaved edits — shows a ● on its DocTab.
 	dirty bool
 	// lastResp is the most recent successful Response (nil if none/error), shown
@@ -131,10 +135,20 @@ func newRequestTab(w *Window, idx int) *requestTab {
 		rt.commit()
 	}
 
+	// Two-way URL⇄Params sync: merge any query string already in the saved URL
+	// into the Params, and show the URL with that query reconstructed from the
+	// enabled params. current() stores the query only in Params, so it is never
+	// sent twice. Seed syncedParams here so both the URL field and the Params
+	// table below start from the same data.
+	urlBase, urlQuery := splitURLQuery(req.URL)
+	syncedParams := append(parseQueryParams(urlQuery), req.Params...)
+
 	rt.urlEntry = widget.NewEntry()
 	rt.urlEntry.SetPlaceHolder("https://api.example.com/path")
-	rt.urlEntry.SetText(req.URL)
-	rt.urlEntry.OnChanged = func(string) { rt.commit() }
+	// SetText before wiring OnChanged so this seed does not fire the sync handler
+	// (which references rt.paramsTable, built further below).
+	rt.urlEntry.SetText(joinURLQuery(urlBase, encodeQueryParams(syncedParams)))
+	rt.urlEntry.OnChanged = func(s string) { rt.onURLEdited(s) }
 	// Enter in the URL field sends the request (unless one is already in flight).
 	rt.urlEntry.OnSubmitted = func(string) {
 		if rt.cancel == nil {
@@ -158,7 +172,7 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	topBar := container.NewBorder(nil, nil, methodBox,
 		container.NewHBox(curlBtn, rt.sendBtn), rt.urlEntry)
 
-	rt.paramsTable = newKVTable(req.Params, func() { rt.commit() })
+	rt.paramsTable = newKVTable(syncedParams, func() { rt.onParamsEdited() })
 	rt.headerTable = newKVTable(req.Headers, func() { rt.commit() })
 	rt.authEditor = newAuthEditor(req.Auth, true, func() { rt.commit() })
 	bodyPane := rt.buildBody(req)
@@ -244,12 +258,16 @@ func (rt *requestTab) formatXMLBody() {
 	rt.bodyEntry.SetText(string(out))
 }
 
-// current reads the editor widgets back into a model.Request.
+// current reads the editor widgets back into a model.Request. The URL field's
+// query string is mirrored in the Params table (two-way sync), so only the base
+// URL is stored here — yonner appends the params when building the request, and
+// storing the query in both places would send it twice.
 func (rt *requestTab) current() model.Request {
+	urlBase, _ := splitURLQuery(rt.urlEntry.Text)
 	return model.Request{
 		Name:    rt.nameEntry.Text,
 		Method:  model.Method(strings.ToUpper(rt.methodSel.Text)),
-		URL:     rt.urlEntry.Text,
+		URL:     urlBase,
 		Params:  rt.paramsTable.value(),
 		Headers: rt.headerTable.value(),
 		Auth:    rt.authEditor.value(),
@@ -258,6 +276,37 @@ func (rt *requestTab) current() model.Request {
 			Content: rt.bodyEntry.Text,
 		},
 	}
+}
+
+// onURLEdited handles a change to the URL field: it reparses the query string
+// into the Params table (enabled rows mirror the URL query; disabled rows are
+// preserved as "kept but not sent"), then commits. The syncing guard stops the
+// table rebuild from echoing back as a URL rewrite.
+func (rt *requestTab) onURLEdited(s string) {
+	if !rt.syncing {
+		rt.syncing = true
+		_, query := splitURLQuery(s)
+		merged := mergeQueryIntoParams(rt.paramsTable.value(), parseQueryParams(query))
+		rt.paramsTable.setValue(merged)
+		rt.syncing = false
+	}
+	rt.commit()
+}
+
+// onParamsEdited handles a change to the Params table: it rewrites the URL
+// field's query string from the enabled rows (keeping the base path), then
+// commits. The syncing guard stops the URL rewrite from echoing back as a table
+// rebuild.
+func (rt *requestTab) onParamsEdited() {
+	if !rt.syncing {
+		rt.syncing = true
+		base, _ := splitURLQuery(rt.urlEntry.Text)
+		if next := joinURLQuery(base, encodeQueryParams(rt.paramsTable.value())); next != rt.urlEntry.Text {
+			rt.urlEntry.SetText(next)
+		}
+		rt.syncing = false
+	}
+	rt.commit()
 }
 
 // commit writes the editor's Request back into the Collection (marks dirty,
@@ -272,7 +321,12 @@ func (rt *requestTab) commit() {
 // showCurl displays the equivalent curl command for the current request in a
 // dialog with a Copy button.
 func (rt *requestTab) showCurl() {
-	cmd := yonner.ToCurl(rt.current(), rt.win.coll, rt.win.app.settings.options())
+	opts := rt.win.app.settings.options()
+	// Expand {{variable}} templates with the active environment + collection
+	// variables, matching startSend, so the copied curl reflects the request
+	// that is actually sent rather than literal (and URL-escaped) {{names}}.
+	opts.Resolve = rt.win.varScope().Resolve
+	cmd := yonner.ToCurl(rt.current(), rt.win.coll, opts)
 
 	entry := widget.NewMultiLineEntry()
 	entry.SetText(cmd)

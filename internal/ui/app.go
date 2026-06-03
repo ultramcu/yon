@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/dialog"
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/store"
@@ -62,6 +63,21 @@ func (a *App) Run(files ...string) {
 		a.saveSession()
 	})
 
+	// macOS delivers Finder double-clicks as an "open document" Apple Event
+	// rather than on the command line, so install a handler for it. On
+	// Windows/Linux this is a no-op (those arrive via files above). The event
+	// fires on the Cocoa main thread, so hop onto the Fyne loop.
+	//
+	// It is registered twice: once here (best effort for a cold launch, where
+	// the event may arrive before the loop is up) and again from OnStarted,
+	// because AppKit overwrites the handler with its own default during launch —
+	// the OnStarted registration is the one that ultimately sticks.
+	openHandler := func(path string) { fyne.Do(func() { a.openFromOS(path) }) }
+	registerOpenFilesHandler(openHandler)
+	a.fyneApp.Lifecycle().SetOnStarted(func() {
+		registerOpenFilesHandler(openHandler)
+	})
+
 	if len(files) > 0 {
 		opened := 0
 		for _, f := range files {
@@ -105,6 +121,30 @@ func (a *App) OpenPath(path string) error {
 	}
 	a.OpenCollectionWindow(coll, path)
 	a.rememberRecent(path)
+	return nil
+}
+
+// openFromOS opens a .yon file requested by the operating system (a macOS
+// "open document" Apple Event from Finder, `open`, or the Dock). Unlike the
+// command-line path in Run, there is no terminal to print to, so a load error
+// is surfaced in a dialog on an existing window (falling back to stderr if none
+// is open yet). On success the Collection opens in its own window.
+func (a *App) openFromOS(path string) {
+	if err := a.OpenPath(path); err != nil {
+		if w := a.anyWindow(); w != nil {
+			dialog.ShowError(err, w.win)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "yon: cannot open %q: %v\n", path, err)
+	}
+}
+
+// anyWindow returns one open Collection window, or nil if none are open. Used
+// to anchor dialogs that are not tied to a specific window.
+func (a *App) anyWindow() *Window {
+	for w := range a.windows {
+		return w
+	}
 	return nil
 }
 

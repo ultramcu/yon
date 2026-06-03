@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shared MIME-info entry that teaches the desktop the .yon file type so file
+     managers route double-clicks to Yon (see yon.desktop's MimeType=). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-yon">
+    <comment>Yon collection</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.yon"/>
+    <icon name="yon"/>
+  </mime-type>
+</mime-info>

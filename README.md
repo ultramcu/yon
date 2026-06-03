@@ -30,7 +30,11 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 ## Features
 
 - **Methods:** GET · POST · PUT · DELETE · PATCH · HEAD · OPTIONS — or type any custom verb
-- **Query parameters** and **headers** as toggleable key/value tables
+- **Query parameters** and **headers** as toggleable key/value tables — the
+  Params table and the URL bar **stay in sync both ways**: paste a URL with a
+  `?query` and the pairs fill the table automatically (no "+ Add" needed), edit
+  the table and the URL updates, and unchecking a row drops it from the URL while
+  keeping it in the table
 - **Auth:** None · Basic · Bearer — set a default on the collection and inherit or
   override it per request
 - **Environments & variables:** `{{variables}}` in named environments (Local / Prod…)
@@ -49,7 +53,9 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 - **Send / Cancel** any in-flight request — or press **Enter** in the URL bar to send
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
   tab per request; native OS open/save dialogs with **Save** / **Save As**, plus
-  **Open Recent**. Your open collections and tabs are restored on the next launch
+  **Open Recent**. Your open collections and tabs are restored on the next launch.
+  **Double-click a `.yon` file** in Finder/Explorer/your file manager to open it in
+  Yon once the file type is registered (see [`packaging/`](packaging/README.md))
 - **Import Collection (JSON):** bring in requests from a Collection v2.1 JSON export —
   folders are flattened into request names and anything Yon can't represent is reported
 - **Edit menu:** Copy · Paste · Find…
@@ -102,6 +108,17 @@ Package a native app bundle with the embedded icon (optional, needs the Fyne CLI
 
 ```sh
 go run fyne.io/tools/cmd/fyne package -os darwin   # or windows / linux
+```
+
+### Double-click to open
+
+To make a double-clicked `.yon` file launch Yon and load that collection, register
+the file type with your OS — see [`packaging/`](packaging/README.md):
+
+```sh
+sh packaging/macos/package.sh                                          # macOS
+powershell -ExecutionPolicy Bypass -File packaging/windows/register-filetype.ps1   # Windows
+sh packaging/linux/install-filetype.sh                                 # Linux
 ```
 
 ## The `.yon` file

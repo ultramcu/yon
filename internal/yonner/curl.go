@@ -32,7 +32,25 @@ func requestURL(req model.Request, opts Options) (string, error) {
 		qb.WriteString(url.QueryEscape(opts.resolve(p.Value)))
 	}
 	u.RawQuery = qb.String()
-	return u.String(), nil
+	return restoreTemplateBraces(u.String()), nil
+}
+
+// templateBraceRestorer turns the percent-encoded forms of the {{ }} template
+// delimiters back into literal braces. url.Parse/url.String (for the path) and
+// url.QueryEscape (for params) percent-encode '{' and '}', so an unresolved
+// {{variable}} would otherwise render as %7B%7Bvariable%7D%7D in the built URL
+// and copied curl. Only the *doubled* sequence is restored, which is the
+// Postman template delimiter; a lone encoded brace from a real value (e.g. JSON
+// in a query param) is left encoded. Go always emits uppercase percent hex, but
+// lowercase is handled too for safety.
+var templateBraceRestorer = strings.NewReplacer(
+	"%7B%7B", "{{", "%7b%7b", "{{",
+	"%7D%7D", "}}", "%7d%7d", "}}",
+)
+
+// restoreTemplateBraces applies templateBraceRestorer to s. See its doc.
+func restoreTemplateBraces(s string) string {
+	return templateBraceRestorer.Replace(s)
 }
 
 // ToCurl renders req as an equivalent `curl` command line, matching how Send

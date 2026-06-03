@@ -93,6 +93,20 @@ func (t *kvTable) appendRow(p model.Param) {
 	t.rowsBox.Refresh()
 }
 
+// setValue replaces every row with params, without firing onChange. Used by the
+// URL⇄Params sync to rebuild the table from the URL's query string; the caller
+// fires onChange itself once the rebuild is done.
+func (t *kvTable) setValue(params []model.Param) {
+	for _, r := range t.rows {
+		t.rowsBox.Remove(r.object)
+	}
+	t.rows = nil
+	for _, p := range params {
+		t.appendRow(p)
+	}
+	t.rowsBox.Refresh()
+}
+
 // removeRow drops a row from the table.
 func (t *kvTable) removeRow(target *kvRow) {
 	for i, r := range t.rows {

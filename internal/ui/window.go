@@ -47,6 +47,11 @@ type Window struct {
 	// add/delete can refresh the number without rebuilding the header.
 	sidebarCount *widget.Label
 
+	// sidebarTitle is the collection-name label in the header; kept so
+	// updateTitle can refresh it (e.g. after Save As changes the file/name)
+	// without rebuilding the header.
+	sidebarTitle *widget.Label
+
 	// selectedID is the currently-selected sidebar row (-1 = none); a row paints
 	// its cyan left-accent bar when its id matches, on top of the List's own
 	// selection tint.
@@ -140,11 +145,10 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 // icon + collection name, a count badge of how many Requests it holds, and a
 // compact "Add" button. Matches the v2 mockup's "Yon Test Server  [13]" row.
 func (w *Window) buildSidebarHeader() fyne.CanvasObject {
-	name := w.coll.Name
-	if name == "" {
-		name = "Untitled"
-	}
-	title := widget.NewLabelWithStyle(name, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	w.sidebarTitle = widget.NewLabelWithStyle(
+		collectionDisplayName(w.coll.Name, w.path),
+		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title := w.sidebarTitle
 
 	w.sidebarCount = widget.NewLabel("")
 	w.refreshSidebarCount()
@@ -298,15 +302,27 @@ func (w *Window) markDirty() {
 	}
 }
 
-// updateTitle reflects the Collection name, file, and dirty marker in the title.
+// collectionDisplayName is the human-readable name shown for a Collection in
+// the window title and the sidebar header: the Collection's own Name, else the
+// file's base name when it was loaded/saved to disk, else "Untitled".
+func collectionDisplayName(name, path string) string {
+	switch {
+	case name != "":
+		return name
+	case path != "":
+		return filepath.Base(path)
+	default:
+		return "Untitled"
+	}
+}
+
+// updateTitle reflects the Collection name, file, and dirty marker in the window
+// title and keeps the sidebar header label in sync (e.g. after Save As changes
+// the file the empty-name fallback resolves to).
 func (w *Window) updateTitle() {
-	name := w.coll.Name
-	if name == "" {
-		if w.path != "" {
-			name = filepath.Base(w.path)
-		} else {
-			name = "Untitled"
-		}
+	name := collectionDisplayName(w.coll.Name, w.path)
+	if w.sidebarTitle != nil {
+		w.sidebarTitle.SetText(name)
 	}
 	marker := ""
 	if w.dirty {

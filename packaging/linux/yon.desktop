@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Yon
+Comment=Minimal, fast, offline HTTP API client
+# %F passes the double-clicked file path(s) on the command line, which Yon opens.
+Exec=yon %F
+Icon=yon
+Terminal=false
+Categories=Development;Network;
+MimeType=application/x-yon;
