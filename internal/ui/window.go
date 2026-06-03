@@ -316,19 +316,35 @@ func (w *Window) renameCollection(name string) {
 }
 
 // showRenameCollection opens a dialog to edit the Collection's Name, prefilled
-// with the current name. Saving applies it via renameCollection.
+// with the name currently shown (renamePrefill) so it clearly edits the existing
+// collection rather than appearing blank (which felt like creating a new one).
+// The confirm button says "Rename", not "Save", to reinforce that.
 func (w *Window) showRenameCollection() {
 	entry := widget.NewEntry()
-	entry.SetText(w.coll.Name)
 	entry.SetPlaceHolder("Collection name")
-	entry.OnSubmitted = nil // Enter is handled by the dialog's confirm button
-	dialog.ShowForm("Rename Collection", "Save", "Cancel",
+	entry.SetText(w.renamePrefill())
+	dialog.ShowForm("Rename Collection", "Rename", "Cancel",
 		[]*widget.FormItem{widget.NewFormItem("Name", entry)},
 		func(ok bool) {
 			if ok {
 				w.renameCollection(entry.Text)
 			}
 		}, w.win)
+}
+
+// renamePrefill is the value the Rename dialog starts with: the collection's
+// current Name, or — when it has none but is backed by a file — the file's base
+// name without the .yon extension, so the field shows the visible name instead
+// of being blank. An untitled, unnamed collection prefills empty (placeholder).
+func (w *Window) renamePrefill() string {
+	if w.coll.Name != "" {
+		return w.coll.Name
+	}
+	if w.path != "" {
+		base := filepath.Base(w.path)
+		return strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return ""
 }
 
 // collectionDisplayName is the human-readable name shown for a Collection in
