@@ -41,6 +41,14 @@ func (a *App) saveSession() {
 		s.Windows = append(s.Windows, w.sessionState())
 	}
 
+	// Never overwrite a good session with an empty one: with no rememberable
+	// windows there is nothing to restore, and writing here would clobber a
+	// previously-saved session (e.g. the post-quit OnStopped save that fires
+	// after the last window has already been forgotten). Bail without writing.
+	if len(s.Windows) == 0 {
+		return
+	}
+
 	data, err := json.Marshal(s)
 	if err != nil {
 		return

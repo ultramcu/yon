@@ -475,11 +475,28 @@ func (w *Window) onCloseRequested() {
 
 // finishClose tears down the window: cancels in-flight sends and drops it from
 // the app's live set so it leaves the next session save.
+//
+// Session persistence is driven from here because closing the last window via
+// the red X tears the window down before Fyne's OnStopped hook runs, so by the
+// time that hook calls saveSession the live set is already empty (and the
+// empty-session guard would skip it). We therefore persist at the right moment:
+//   - Closing the LAST window == quitting, so save while it is still in the live
+//     set, capturing this collection for next launch.
+//   - Closing one of several windows: re-persist the remaining set after this
+//     one is forgotten so the closed window drops out (no over-restore).
 func (w *Window) finishClose() {
 	for _, rt := range w.openTabs {
 		rt.cancelInFlight()
 	}
+	if len(w.app.windows) == 1 {
+		// closing the last window == quitting: persist it now (still in a.windows)
+		w.app.saveSession()
+	}
 	w.app.forgetWindow(w)
+	if len(w.app.windows) > 0 {
+		// closing one of several: re-persist the remaining set so the closed one drops
+		w.app.saveSession()
+	}
 	w.win.Close()
 }
 
