@@ -2,5 +2,5 @@
   Icon = "internal/ui/icon.png"
   Name = "Yon"
   ID = "com.ultramcu.yon"
-  Version = "0.8.0"
-  Build = 9
+  Version = "0.9.0"
+  Build = 10
