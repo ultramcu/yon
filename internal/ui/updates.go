@@ -17,11 +17,23 @@ import (
 	"github.com/ultramcu/yon/internal/updater"
 )
 
-// buildVersion is an optional version injected at link time
-// (-ldflags "-X 'github.com/ultramcu/yon/internal/ui.buildVersion=0.3.0'"). It
-// takes precedence over the Fyne metadata, which only populates under
-// `fyne package`. Empty in a plain `go build`.
+// buildVersion is the running build's version. main sets it from the embedded
+// FyneApp.toml via SetBuildVersion; it can also be injected at link time
+// (-ldflags "-X 'github.com/ultramcu/yon/internal/ui.buildVersion=0.3.0'"),
+// which takes precedence. It is preferred over the Fyne metadata, which only
+// populates under `fyne package` (and is "0.0.1" for a plain go build).
 var buildVersion string
+
+// SetBuildVersion records the running version when it was not already injected
+// at link time. main calls it with the version parsed from the embedded
+// FyneApp.toml, so every build — go build, fyne package, every platform — knows
+// its own version. An ldflags-set buildVersion wins (a custom -X override is
+// preserved).
+func SetBuildVersion(v string) {
+	if buildVersion == "" {
+		buildVersion = v
+	}
+}
 
 // currentVersion is the running build's version: the ldflags override if set,
 // otherwise the FyneApp.toml version embedded by `fyne package`. Empty for plain
