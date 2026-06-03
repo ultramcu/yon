@@ -96,16 +96,29 @@ jobs:
             linux)   mv Yon.tar.xz "dist/Yon-${GITHUB_REF_NAME}-linux.tar.xz" ;;
           esac
 
-      # Upload this platform's asset but keep the release a DRAFT: each matrix job
-      # attaches its own file, and the release must not go public until all three
-      # are present (otherwise an in-app update check during the build sees the
-      # new version with no downloadable asset for its OS). draft: true also
-      # prevents the first finishing job from publishing a half-built release.
-      - name: Attach to draft release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          draft: true
+      # Upload this platform's asset to the pre-created DRAFT release with the gh
+      # CLI (a native runner binary — avoids the deprecated Node-20 action) and a
+      # retry loop, because the upload step occasionally hits a transient
+      # api.github.com connect timeout. --clobber makes a retry idempotent. The
+      # release stays a draft (upload never publishes it); the publish job below
+      # flips it public only once all three platforms have uploaded, so an in-app
+      # update check never sees a version with a missing per-OS download.
+      - name: Upload asset to the draft release (with retry)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"; then
+              echo "uploaded on attempt $attempt"
+              exit 0
+            fi
+            echo "upload attempt $attempt failed; retrying in 15s..." >&2
+            sleep 15
+          done
+          echo "upload failed after 3 attempts" >&2
+          exit 1
 
   # Publish the release only after all platform builds succeeded and uploaded
   # their assets, so users never see a version they can't download yet.

@@ -61,11 +61,12 @@ download. Steps:
    ```sh
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
-4. `release.yml` builds all three platforms, attaches each asset to the draft
-   (`draft: true`), and the `publish` job flips the release to public once all
-   builds succeed. If any platform fails, the release stays a draft.
-
-> After the first run, confirm the published release kept the notes from step 2.
+4. `release.yml` builds all three platforms and uploads each asset to the draft
+   with `gh release upload --clobber` (retried up to 3× for transient
+   `api.github.com` timeouts); the `publish` job flips the release to public once
+   all builds succeed. If any platform fails, the release stays a draft — just
+   re-run the failed job (`gh run rerun <id> --failed`); `--clobber` makes the
+   retry idempotent, then publish runs.
 
 ## Known limitations (verify on a real install)
 
