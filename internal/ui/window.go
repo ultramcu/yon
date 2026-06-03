@@ -365,22 +365,43 @@ func (w *Window) finishClose() {
 
 // ---- Menu + file actions ----
 
+// saveShortcut / saveAsShortcut are the Save (Cmd/Ctrl+S) and Save As
+// (Cmd/Ctrl+Shift+S) accelerators. Unlike Find / Copy / Paste (see buildMainMenu),
+// Save can safely be a menu accelerator: nothing in a focused Entry or pop-out
+// window binds Cmd+S, so there is no shortcut to hijack — and a menu accelerator
+// (unlike a canvas shortcut) still fires while a text field is focused, which is
+// exactly when the user reaches for Save.
+var (
+	saveShortcut   = &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierShortcutDefault}
+	saveAsShortcut = &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierShortcutDefault | fyne.KeyModifierShift}
+)
+
 func (w *Window) buildMenu() {
+	w.win.SetMainMenu(w.buildMainMenu())
+}
+
+// buildMainMenu assembles the window's menu bar. Split from buildMenu (which
+// installs it) so the menu — and its Save/Save As accelerators — is unit-testable.
+func (w *Window) buildMainMenu() *fyne.MainMenu {
+	saveItem := fyne.NewMenuItem("Save", func() { w.save(nil) })
+	saveItem.Shortcut = saveShortcut
+	saveAsItem := fyne.NewMenuItem("Save As…", func() { w.saveAs(nil) })
+	saveAsItem.Shortcut = saveAsShortcut
 	fileMenu := fyne.NewMenu("File",
 		fyne.NewMenuItem("New", func() { w.app.NewCollectionWindow() }),
 		fyne.NewMenuItem("Open…", w.open),
 		fyne.NewMenuItem("Import Collection (JSON)…", w.importCollection),
 		w.recentMenuItem(),
 		fyne.NewMenuItemSeparator(),
-		fyne.NewMenuItem("Save", func() { w.save(nil) }),
-		fyne.NewMenuItem("Save As…", func() { w.saveAs(nil) }),
+		saveItem,
+		saveAsItem,
 	)
-	// No keyboard accelerators on these items: on macOS a main-menu accelerator
-	// is registered app-globally and bound to this (main) window, so it would
-	// hijack Cmd+F / Cmd+C / Cmd+V from a focused pop-out window and act on the
-	// main window instead. The shortcuts are handled per-window instead — Cmd+F
-	// via each window's canvas/find-field, Cmd+C/V by the focused Entry itself —
-	// so these menu items provide discoverable, mouse-driven access.
+	// No accelerators on Find / Copy / Paste: on macOS a main-menu accelerator is
+	// registered app-globally and bound to the menu's window, so it would hijack
+	// Cmd+F / Cmd+C / Cmd+V from a focused pop-out window or Entry and act on the
+	// wrong target. Those are handled per-window instead — Cmd+F via each window's
+	// canvas/find-field, Cmd+C/V by the focused Entry itself — so these menu items
+	// provide discoverable, mouse-driven access. (Save is exempt; see saveShortcut.)
 	editMenu := fyne.NewMenu("Edit",
 		fyne.NewMenuItem("Copy", w.editCopy),
 		fyne.NewMenuItem("Paste", w.editPaste),
@@ -402,7 +423,7 @@ func (w *Window) buildMenu() {
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
 		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
 	)
-	w.win.SetMainMenu(fyne.NewMainMenu(fileMenu, editMenu, collMenu, helpMenu))
+	return fyne.NewMainMenu(fileMenu, editMenu, collMenu, helpMenu)
 }
 
 // openFindActive opens find on the active request's response (Edit ▸ Find…, Cmd/Ctrl+F).
