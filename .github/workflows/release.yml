@@ -58,6 +58,9 @@ jobs:
             exe="$(ls Yon.app/Contents/MacOS/*)"
             cp yon-universal "$exe"
             lipo -archs "$exe"
+            # Register the .yon document type so double-clicking a collection in
+            # Finder opens it in Yon (same injection as packaging/macos/package.sh).
+            sh packaging/macos/register-filetype.sh Yon.app
           else
             "$FYNE" package -os ${{ matrix.target }}
           fi
