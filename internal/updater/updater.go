@@ -211,6 +211,20 @@ func Reveal(path string) error {
 	}
 }
 
+// OpenFile opens path with the host's default handler — as if the user
+// double-clicked it — e.g. mounting a .dmg or opening a .zip / .tar.xz. It waits
+// for the launcher to hand off so the caller can safely quit afterwards.
+func OpenFile(path string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", path).Run()
+	case "windows":
+		return exec.Command("cmd", "/c", "start", "", path).Run()
+	default:
+		return exec.Command("xdg-open", path).Run()
+	}
+}
+
 // checkTimeout / downloadTimeout are sensible context deadlines for callers.
 const (
 	CheckTimeout    = 15 * time.Second

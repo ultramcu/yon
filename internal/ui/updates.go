@@ -150,9 +150,24 @@ func (w *Window) downloadUpdate() {
 				dialog.ShowError(fmt.Errorf("download failed: %w", err), w.win)
 				return
 			}
-			_ = updater.Reveal(path)
-			dialog.ShowInformation("Download complete",
-				fmt.Sprintf("Saved to:\n%s\n\nOpen it to install Yon %s.", path, rel.TagName), w.win)
+			// Installing means replacing the running app, so offer to open the
+			// downloaded installer and quit Yon now (you can't overwrite it while
+			// it's running). "Later" just reveals the file in the file manager.
+			d := dialog.NewConfirm("Update downloaded",
+				fmt.Sprintf("Yon %s was downloaded to:\n%s\n\nTo install it, Yon needs to quit so the running app can be replaced. Open the installer and quit Yon now?", rel.TagName, path),
+				func(ok bool) {
+					if !ok {
+						_ = updater.Reveal(path)
+						return
+					}
+					go func() {
+						_ = updater.OpenFile(path)
+						fyne.Do(func() { fyne.CurrentApp().Quit() })
+					}()
+				}, w.win)
+			d.SetConfirmText("Open & Quit")
+			d.SetDismissText("Later")
+			d.Show()
 		})
 	}()
 }
