@@ -750,7 +750,10 @@ func (w *Window) updateStatusBar() {
 		w.sbReqInfo.Text = ""
 	} else {
 		req := w.coll.Requests[rt.idx]
-		w.sbReqInfo.Text = fmt.Sprintf("%s · %s", req.Method, urlPathOf(req.URL))
+		// Resolve {{variables}} so the status bar shows the real path (the
+		// environment/collection value) rather than the literal {{key}} template.
+		resolvedURL := w.varScope().Resolve(req.URL)
+		w.sbReqInfo.Text = fmt.Sprintf("%s · %s", req.Method, urlPathOf(resolvedURL))
 		if r := rt.lastResp; r != nil {
 			w.sbStatus.Text = fmt.Sprintf("● %d %s", r.Status, r.StatusText)
 			w.sbStatus.Color = statusColor(r.Status)
