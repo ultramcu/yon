@@ -33,6 +33,10 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 - **Query parameters** and **headers** as toggleable key/value tables
 - **Auth:** None · Basic · Bearer — set a default on the collection and inherit or
   override it per request
+- **Environments & variables:** `{{variables}}` in named environments (Local / Prod…)
+  and collection-level variables, switched from a toolbar selector and substituted in
+  the URL, params, headers, body and auth. Secrets stay out of committed files (kept in
+  a gitignored `.env`); plus dynamic `{{$uuid}}` / `{{$timestamp}}`
 - **Body:** None · JSON (auto `Content-Type` + pretty) · XML (auto `Content-Type` + format) · Text
 - **Response viewer:** status · time · size · headers, with a **Pretty** (indented and
   syntax-coloured for JSON, XML and HTML) / **Raw** toggle and one-click **Copy**; huge bodies render

@@ -5,11 +5,24 @@
     "kind": "bearer",
     "token": "yon-demo-token"
   },
+  "variables": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:7878",
+      "enabled": true
+    },
+    {
+      "key": "bearerToken",
+      "value": "yon-demo-token",
+      "enabled": true
+    }
+  ],
+  "activeEnvironment": "Local",
   "requests": [
     {
       "name": "GET — query params + custom header",
       "method": "GET",
-      "url": "http://localhost:7878/get",
+      "url": "{{baseUrl}}/get",
       "params": [
         {
           "key": "page",
@@ -44,7 +57,7 @@
     {
       "name": "POST — JSON body",
       "method": "POST",
-      "url": "http://localhost:7878/post",
+      "url": "{{baseUrl}}/post",
       "auth": {
         "kind": "none"
       },
@@ -56,7 +69,7 @@
     {
       "name": "PUT — JSON body",
       "method": "PUT",
-      "url": "http://localhost:7878/put",
+      "url": "{{baseUrl}}/put",
       "auth": {
         "kind": "none"
       },
@@ -68,7 +81,7 @@
     {
       "name": "DELETE",
       "method": "DELETE",
-      "url": "http://localhost:7878/delete",
+      "url": "{{baseUrl}}/delete",
       "auth": {
         "kind": "none"
       },
@@ -79,7 +92,7 @@
     {
       "name": "Bearer auth (inherits collection token)",
       "method": "GET",
-      "url": "http://localhost:7878/bearer",
+      "url": "{{baseUrl}}/bearer",
       "auth": {
         "kind": "inherit"
       },
@@ -90,7 +103,7 @@
     {
       "name": "Basic auth (overrides collection)",
       "method": "GET",
-      "url": "http://localhost:7878/basic-auth/alice/secret",
+      "url": "{{baseUrl}}/basic-auth/alice/secret",
       "auth": {
         "kind": "basic",
         "username": "alice",
@@ -103,7 +116,7 @@
     {
       "name": "Headers echo",
       "method": "GET",
-      "url": "http://localhost:7878/headers",
+      "url": "{{baseUrl}}/headers",
       "headers": [
         {
           "key": "X-Trace-Id",
@@ -126,7 +139,7 @@
     {
       "name": "Status 404 (orange)",
       "method": "GET",
-      "url": "http://localhost:7878/status/404",
+      "url": "{{baseUrl}}/status/404",
       "auth": {
         "kind": "none"
       },
@@ -137,7 +150,7 @@
     {
       "name": "Status 500 (red)",
       "method": "GET",
-      "url": "http://localhost:7878/status/500",
+      "url": "{{baseUrl}}/status/500",
       "auth": {
         "kind": "none"
       },
@@ -148,7 +161,7 @@
     {
       "name": "Redirect → /get (follows)",
       "method": "GET",
-      "url": "http://localhost:7878/redirect",
+      "url": "{{baseUrl}}/redirect",
       "auth": {
         "kind": "none"
       },
@@ -157,9 +170,9 @@
       }
     },
     {
-      "name": "Large body (> 256 KB, truncates)",
+      "name": "Large body (\u003e 256 KB, truncates)",
       "method": "GET",
-      "url": "http://localhost:7878/large",
+      "url": "{{baseUrl}}/large",
       "auth": {
         "kind": "none"
       },
@@ -170,7 +183,7 @@
     {
       "name": "Slow 10s (test Cancel / timeout)",
       "method": "GET",
-      "url": "http://localhost:7878/slow",
+      "url": "{{baseUrl}}/slow",
       "params": [
         {
           "key": "seconds",
@@ -188,7 +201,7 @@
     {
       "name": "Pretty JSON (syntax colour)",
       "method": "GET",
-      "url": "http://localhost:7878/json",
+      "url": "{{baseUrl}}/json",
       "auth": {
         "kind": "none"
       },
@@ -199,7 +212,7 @@
     {
       "name": "GET — XML response",
       "method": "GET",
-      "url": "http://localhost:7878/xml",
+      "url": "{{baseUrl}}/xml",
       "auth": {
         "kind": "none"
       },
@@ -210,19 +223,19 @@
     {
       "name": "POST — XML body",
       "method": "POST",
-      "url": "http://localhost:7878/xml",
+      "url": "{{baseUrl}}/xml",
       "auth": {
         "kind": "none"
       },
       "body": {
         "type": "xml",
-        "content": "<order id=\"1001\"><item sku=\"A1\">Widget</item><item sku=\"B2\">Gadget</item></order>"
+        "content": "\u003corder id=\"1001\"\u003e\u003citem sku=\"A1\"\u003eWidget\u003c/item\u003e\u003citem sku=\"B2\"\u003eGadget\u003c/item\u003e\u003c/order\u003e"
       }
     },
     {
       "name": "GET — HTML page",
       "method": "GET",
-      "url": "http://localhost:7878/html",
+      "url": "{{baseUrl}}/html",
       "auth": {
         "kind": "none"
       },
@@ -233,7 +246,7 @@
     {
       "name": "GET — SOAP envelope",
       "method": "GET",
-      "url": "http://localhost:7878/soap",
+      "url": "{{baseUrl}}/soap",
       "auth": {
         "kind": "none"
       },
@@ -244,7 +257,7 @@
     {
       "name": "PATCH — echo method",
       "method": "PATCH",
-      "url": "http://localhost:7878/anything",
+      "url": "{{baseUrl}}/anything",
       "auth": {
         "kind": "none"
       },

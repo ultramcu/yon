@@ -62,11 +62,11 @@ func (w *Window) sessionState() sessionWindow {
 	}
 
 	selected := w.tabs.Selected()
-	for _, item := range w.tabs.Items {
-		// Find the requestTab whose tab == item.
+	for _, card := range w.tabs.Cards() {
+		// Find the requestTab whose tab == card.
 		for rt, idx := range tabToIdx {
-			if rt.tab == item {
-				if item == selected {
+			if rt.tab == card {
+				if card == selected {
 					sw.ActiveIndex = len(sw.OpenTabs)
 				}
 				sw.OpenTabs = append(sw.OpenTabs, idx)
@@ -133,7 +133,7 @@ func (w *Window) restoreTabs(sw sessionWindow, requestCount int) {
 			selected = true
 		}
 	}
-	if !selected && len(w.tabs.Items) > 0 {
+	if !selected && len(w.tabs.Cards()) > 0 {
 		w.tabs.SelectIndex(0)
 	}
 }

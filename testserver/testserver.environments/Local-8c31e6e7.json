@@ -1,0 +1,15 @@
+{
+  "name": "Local",
+  "variables": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:7878",
+      "enabled": true
+    },
+    {
+      "key": "apiKey",
+      "enabled": true,
+      "secret": true
+    }
+  ]
+}

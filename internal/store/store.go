@@ -50,6 +50,23 @@ func Save(path string, c model.Collection) error {
 		c.Version = CurrentVersion
 	}
 
+	// Collection variables do NOT support secrets (secrets belong to
+	// environments and live only in the gitignored .env). Defensively blank the
+	// value of any collection variable hand-marked Secret so a secret value can
+	// never leak into the committed .yon. Operate on a copy of the Variables
+	// slice so the caller's Collection is never mutated; the key and secret flag
+	// are preserved, only the value is dropped.
+	if len(c.Variables) > 0 {
+		vars := make([]model.Variable, len(c.Variables))
+		copy(vars, c.Variables)
+		for i := range vars {
+			if vars[i].Secret {
+				vars[i].Value = ""
+			}
+		}
+		c.Variables = vars
+	}
+
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("store: marshal collection for %q: %w", path, err)

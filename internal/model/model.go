@@ -109,11 +109,18 @@ type Request struct {
 // Collection is a flat, ordered list of Requests persisted as one .yon file.
 // Version is the schema version (starting at 1) and Auth is the
 // Collection-level default whose Kind is one of none/basic/bearer.
+//
+// Variables are collection-scoped {{template}} values (lowest precedence, below
+// the active environment). ActiveEnvironment names the environment selected for
+// this collection; the environments themselves live in sibling files, not in the
+// .yon (see the store package), so secrets never land in the committed file.
 type Collection struct {
-	Version  int       `json:"version"`
-	Name     string    `json:"name"`
-	Auth     Auth      `json:"auth"`
-	Requests []Request `json:"requests,omitempty"`
+	Version           int        `json:"version"`
+	Name              string     `json:"name"`
+	Auth              Auth       `json:"auth"`
+	Variables         []Variable `json:"variables,omitempty"`
+	ActiveEnvironment string     `json:"activeEnvironment,omitempty"`
+	Requests          []Request  `json:"requests,omitempty"`
 }
 
 // Response is the result of sending a Request. It is read-only data: status,

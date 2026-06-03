@@ -29,6 +29,24 @@ type Options struct {
 	// FollowRedirects, when false, makes Send return the first (redirect)
 	// response instead of following it.
 	FollowRedirects bool
+	// Resolve expands Postman-style {{variable}} templates in the outgoing
+	// request's text fields (URL, enabled query params, enabled headers, body,
+	// and resolved Basic/Bearer auth) just before the *http.Request is built.
+	// It is applied per string value; the caller supplies whatever substitution
+	// it wants (environment lookups, defaults, leaving unknown names intact).
+	// A nil Resolve is treated as the identity function, so requests are sent
+	// verbatim and existing behaviour is unchanged.
+	Resolve func(string) string
+}
+
+// resolve applies o.Resolve to s, treating a nil Resolve as the identity
+// function. All outgoing string values pass through here exactly once so
+// substitution stays centralised and is never applied twice.
+func (o Options) resolve(s string) string {
+	if o.Resolve == nil {
+		return s
+	}
+	return o.Resolve(s)
 }
 
 // DefaultOptions returns the standard connection defaults: a 30s timeout,
@@ -64,18 +82,35 @@ const headerContentType = "Content-Type"
 //     Content-Type: application/json (XML bodies add application/xml) only when
 //     the user has not already set a Content-Type header.
 func Build(ctx context.Context, req model.Request, coll model.Collection) (*http.Request, error) {
+	// No Options here, so Resolve is nil (identity): build the request verbatim.
+	return BuildWith(ctx, req, coll, Options{})
+}
+
+// BuildWith is Build with explicit Options, so opts.Resolve can expand
+// {{variable}} templates in the URL, enabled query params, enabled headers, the
+// body, and the resolved Basic/Bearer auth just before the *http.Request is
+// constructed. With a nil opts.Resolve it is identical to Build. Send uses this
+// form so the variables a caller configures take effect on the wire.
+//
+// Substitution is applied to outgoing string values only; the stored Request is
+// never mutated and disabled entries are skipped before their values are read.
+// The Content-Type auto-set logic runs on the post-substitution header keys, so
+// a user-supplied (possibly templated) Content-Type still suppresses the JSON or
+// XML default.
+func BuildWith(ctx context.Context, req model.Request, coll model.Collection, opts Options) (*http.Request, error) {
 	// Build the URL with enabled query params appended in order (see requestURL,
-	// shared with ToCurl).
-	finalURL, err := requestURL(req)
+	// shared with ToCurl). The resolver expands the URL and each enabled param.
+	finalURL, err := requestURL(req, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Body: WYSIWYG — send for any method when present.
+	// Body: WYSIWYG — send for any method when present. Resolve the content so
+	// {{variable}} templates in the body are expanded on the wire.
 	var body io.Reader
 	hasBody := req.Body.Type != model.BodyNone && req.Body.Content != ""
 	if hasBody {
-		body = strings.NewReader(req.Body.Content)
+		body = strings.NewReader(opts.resolve(req.Body.Content))
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, string(req.Method), finalURL, body)
@@ -84,33 +119,38 @@ func Build(ctx context.Context, req model.Request, coll model.Collection) (*http
 	}
 
 	// Track whether the user explicitly set Authorization / Content-Type
-	// (case-insensitive) so derived values never clobber explicit ones.
+	// (case-insensitive) so derived values never clobber explicit ones. The
+	// check runs on the resolved key, so a templated header name is honoured.
 	userSetAuth := false
 	userSetContentType := false
 
 	// Set enabled headers from the table. http.Header.Add canonicalizes keys,
-	// so case differences collapse correctly.
+	// so case differences collapse correctly. Both key and value are resolved.
 	for _, h := range req.Headers {
 		if !h.Enabled {
 			continue
 		}
-		if strings.EqualFold(h.Key, headerAuthorization) {
+		key := opts.resolve(h.Key)
+		value := opts.resolve(h.Value)
+		if strings.EqualFold(key, headerAuthorization) {
 			userSetAuth = true
 		}
-		if strings.EqualFold(h.Key, headerContentType) {
+		if strings.EqualFold(key, headerContentType) {
 			userSetContentType = true
 		}
-		httpReq.Header.Add(h.Key, h.Value)
+		httpReq.Header.Add(key, value)
 	}
 
 	// Auth: derived Authorization, only when the user didn't set one explicitly.
+	// ResolveAuth returns a value, so resolving its fields never mutates the
+	// stored Request or Collection.
 	if !userSetAuth {
 		auth := model.ResolveAuth(req, coll)
 		switch auth.Kind {
 		case model.AuthBasic:
-			httpReq.SetBasicAuth(auth.Username, auth.Password)
+			httpReq.SetBasicAuth(opts.resolve(auth.Username), opts.resolve(auth.Password))
 		case model.AuthBearer:
-			httpReq.Header.Set(headerAuthorization, "Bearer "+auth.Token)
+			httpReq.Header.Set(headerAuthorization, "Bearer "+opts.resolve(auth.Token))
 		default:
 			// "none" / "inherit"-resolved-to-none: send no Authorization.
 		}
@@ -135,7 +175,7 @@ func Build(ctx context.Context, req model.Request, coll model.Collection) (*http
 // governs cancellation and deadlines; a cancelled or timed-out ctx yields a
 // meaningful error rather than a partial Response.
 func Send(ctx context.Context, req model.Request, coll model.Collection, opts Options) (model.Response, error) {
-	httpReq, err := Build(ctx, req, coll)
+	httpReq, err := BuildWith(ctx, req, coll, opts)
 	if err != nil {
 		return model.Response{}, err
 	}

@@ -10,9 +10,11 @@ import (
 )
 
 // requestURL parses req.URL and appends its enabled Query Parameters, preserving
-// the existing query and order (shared by Build and ToCurl).
-func requestURL(req model.Request) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(req.URL))
+// the existing query and order (shared by Build and ToCurl). opts.Resolve
+// expands {{variable}} templates in the URL and in each enabled param's key and
+// value before they are parsed/escaped; a nil resolver leaves them verbatim.
+func requestURL(req model.Request, opts Options) (string, error) {
+	u, err := url.Parse(opts.resolve(strings.TrimSpace(req.URL)))
 	if err != nil {
 		return "", err
 	}
@@ -25,9 +27,9 @@ func requestURL(req model.Request) (string, error) {
 		if qb.Len() > 0 {
 			qb.WriteByte('&')
 		}
-		qb.WriteString(url.QueryEscape(p.Key))
+		qb.WriteString(url.QueryEscape(opts.resolve(p.Key)))
 		qb.WriteByte('=')
-		qb.WriteString(url.QueryEscape(p.Value))
+		qb.WriteString(url.QueryEscape(opts.resolve(p.Value)))
 	}
 	u.RawQuery = qb.String()
 	return u.String(), nil
@@ -37,6 +39,10 @@ func requestURL(req model.Request) (string, error) {
 // builds and sends it: query params, enabled headers, resolved auth (explicit
 // Authorization header wins), JSON auto Content-Type, and the body — plus the
 // connection Options (-L follow redirects, -k insecure TLS, --max-time).
+//
+// opts.Resolve is applied to the same fields as BuildWith (URL, enabled query
+// params, enabled headers, body, and resolved Basic/Bearer auth), so the copied
+// curl reflects the variable-expanded request that is actually sent.
 func ToCurl(req model.Request, coll model.Collection, opts Options) string {
 	var b strings.Builder
 	b.WriteString("curl")
@@ -58,8 +64,8 @@ func ToCurl(req model.Request, coll model.Collection, opts Options) string {
 		b.WriteString(" -X " + method)
 	}
 
-	u := strings.TrimSpace(req.URL)
-	if full, err := requestURL(req); err == nil {
+	u := opts.resolve(strings.TrimSpace(req.URL))
+	if full, err := requestURL(req, opts); err == nil {
 		u = full
 	}
 	b.WriteString(" " + shellQuote(u))
@@ -69,21 +75,23 @@ func ToCurl(req model.Request, coll model.Collection, opts Options) string {
 		if !h.Enabled {
 			continue
 		}
-		if strings.EqualFold(h.Key, headerAuthorization) {
+		key := opts.resolve(h.Key)
+		value := opts.resolve(h.Value)
+		if strings.EqualFold(key, headerAuthorization) {
 			userSetAuth = true
 		}
-		if strings.EqualFold(h.Key, headerContentType) {
+		if strings.EqualFold(key, headerContentType) {
 			userSetCT = true
 		}
-		fmt.Fprintf(&b, " -H %s", shellQuote(h.Key+": "+h.Value))
+		fmt.Fprintf(&b, " -H %s", shellQuote(key+": "+value))
 	}
 
 	if !userSetAuth {
 		switch auth := model.ResolveAuth(req, coll); auth.Kind {
 		case model.AuthBasic:
-			fmt.Fprintf(&b, " -u %s", shellQuote(auth.Username+":"+auth.Password))
+			fmt.Fprintf(&b, " -u %s", shellQuote(opts.resolve(auth.Username)+":"+opts.resolve(auth.Password)))
 		case model.AuthBearer:
-			fmt.Fprintf(&b, " -H %s", shellQuote("Authorization: Bearer "+auth.Token))
+			fmt.Fprintf(&b, " -H %s", shellQuote("Authorization: Bearer "+opts.resolve(auth.Token)))
 		}
 	}
 
@@ -91,7 +99,7 @@ func ToCurl(req model.Request, coll model.Collection, opts Options) string {
 		if req.Body.Type == model.BodyJSON && !userSetCT {
 			fmt.Fprintf(&b, " -H %s", shellQuote("Content-Type: application/json"))
 		}
-		fmt.Fprintf(&b, " --data-raw %s", shellQuote(req.Body.Content))
+		fmt.Fprintf(&b, " --data-raw %s", shellQuote(opts.resolve(req.Body.Content)))
 	}
 
 	return b.String()

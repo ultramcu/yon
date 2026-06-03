@@ -65,7 +65,7 @@ type requestTab struct {
 	win *Window
 	idx int
 
-	tab *container.TabItem
+	tab *tabCard
 
 	// editing widgets
 	nameEntry   *widget.Entry
@@ -150,8 +150,12 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	curlBtn.Importance = widget.LowImportance
 
 	// Top bar: [Method ▾][URL.................][cURL][✈ Send] — the Method Select
-	// renders as a "GET ▾" pill and Send is the primary (cyan) action.
-	topBar := container.NewBorder(nil, nil, rt.methodSel,
+	// renders as a "GET ▾" pill and Send is the primary (cyan) action. The method
+	// box is given a fixed width so the longest verb ("OPTIONS") and the dropdown
+	// arrow are never clipped (the SelectEntry's own MinSize is too narrow).
+	methodBox := container.NewGridWrap(
+		fyne.NewSize(112, rt.methodSel.MinSize().Height), rt.methodSel)
+	topBar := container.NewBorder(nil, nil, methodBox,
 		container.NewHBox(curlBtn, rt.sendBtn), rt.urlEntry)
 
 	rt.paramsTable = newKVTable(req.Params, func() { rt.commit() })
@@ -181,7 +185,13 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	split := container.NewVSplit(requestPane, rt.response.container)
 	split.SetOffset(0.5)
 
-	rt.tab = container.NewTabItem(tabTitle(req), split)
+	// Build the card with a clean (non-dirty) label, matching the old DocTab
+	// which was created with the plain title: setting the method drop-down above
+	// fires a construction-time commit that flips rt.dirty, but a freshly opened
+	// tab must not show the unsaved "●" until the user actually edits it.
+	rt.tab = newTabCard(split)
+	rt.tab.setRequest(req.Method, req.DisplayName(), false)
+	rt.dirty = false
 	return rt
 }
 
@@ -333,6 +343,9 @@ func (rt *requestTab) startSend() {
 	req := rt.current()
 	coll := rt.win.coll
 	opts := rt.win.app.settings.options()
+	// Expand {{variable}} templates (URL, params, headers, body, auth) using the
+	// window's active environment + collection variables.
+	opts.Resolve = rt.win.varScope().Resolve
 
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.sendSeq++

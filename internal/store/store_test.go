@@ -308,3 +308,45 @@ func TestSaveDoesNotClobberOnReSave(t *testing.T) {
 		t.Errorf("re-save left stale content: got %#v", got)
 	}
 }
+
+// TestSave_BlanksSecretCollectionVariable is the regression test for DEFECT A:
+// a collection-level variable hand-marked Secret must never have its plaintext
+// value written into the committed .yon, and Save must not mutate the caller's
+// Collection.
+//
+// Without the fix Save marshals the Collection directly, so "LEAKVALUE" lands in
+// the committed file. With the fix Save operates on a copy and blanks the value
+// of any Secret collection variable before marshaling.
+func TestSave_BlanksSecretCollectionVariable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leak.yon")
+
+	coll := model.Collection{
+		Version: 1,
+		Name:    "Leak",
+		Variables: []model.Variable{
+			{Key: "tok", Value: "LEAKVALUE", Enabled: true, Secret: true},
+		},
+	}
+
+	if err := store.Save(path, coll); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written .yon: %v", err)
+	}
+	if strings.Contains(string(data), "LEAKVALUE") {
+		t.Fatalf("committed .yon leaked secret collection-variable value:\n%s", data)
+	}
+	// The key and secret flag should still be recorded (only the value drops).
+	if !strings.Contains(string(data), `"tok"`) {
+		t.Errorf("committed .yon dropped the secret variable key entirely:\n%s", data)
+	}
+
+	// Save must NOT mutate the caller's Collection.
+	if got := coll.Variables[0].Value; got != "LEAKVALUE" {
+		t.Errorf("Save mutated caller's collection variable value = %q, want %q", got, "LEAKVALUE")
+	}
+}

@@ -35,7 +35,7 @@ type Window struct {
 	dirty bool
 
 	sidebar *widget.List
-	tabs    *container.DocTabs
+	tabs    *tabStrip
 
 	// Bottom status bar (mockup-v9): the active tab's last response status/time/
 	// size on the left, its method · path on the right.
@@ -55,6 +55,14 @@ type Window struct {
 	// openTabs maps a Collection request index to its open editor Tab, so we
 	// don't open the same Request twice and can find a Tab to refresh/select.
 	openTabs map[int]*requestTab
+
+	// envs holds the environments loaded from the collection's sibling files
+	// (empty for an unsaved collection). envSelect is the sidebar-header picker
+	// that chooses the active environment; pendingEnvDeletes queues environment
+	// files to remove on the next manager Save (set by Rename/Delete).
+	envs              []model.Environment
+	envSelect         *widget.Select
+	pendingEnvDeletes []string
 
 	// updateBanner is a dismissible notice shown at the top of the window when a
 	// newer release is found; updateLabel is its text, and pendingRel/pendingAsset
@@ -78,13 +86,14 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	w.win = app.fyneApp.NewWindow("")
 	w.win.SetIcon(appIcon)
 
+	w.loadEnvironments()
 	w.buildSidebar()
 	w.buildTabs()
 	w.buildMenu()
 
 	split := container.NewHSplit(
 		container.NewBorder(w.buildSidebarHeader(), nil, nil, nil, w.sidebar),
-		w.tabs,
+		w.tabs.object(),
 	)
 	split.SetOffset(0.22)
 	w.win.SetContent(container.NewBorder(w.buildUpdateBanner(), w.buildStatusBar(), nil, nil, split))
@@ -106,6 +115,17 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 		func(fyne.Shortcut) {
 			if rt := w.activeTab(); rt != nil {
 				rt.response.closeFind()
+			}
+		},
+	)
+	// Cmd/Ctrl+W closes the active request tab (the standard close-tab shortcut;
+	// not Cmd+Q, which macOS reserves for Quit). Fires when focus is on the tab /
+	// response area; clicking a tab's × always works regardless of focus.
+	w.win.Canvas().AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyW, Modifier: fyne.KeyModifierShortcutDefault},
+		func(fyne.Shortcut) {
+			if rt := w.activeTab(); rt != nil {
+				w.closeTab(rt.tab)
 			}
 		},
 	)
@@ -147,7 +167,14 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 	saveAsBtn.Importance = widget.LowImportance
 	toolbar := container.NewHBox(saveBtn, saveAsBtn)
 
-	return container.NewVBox(header, toolbar, widget.NewSeparator())
+	// Environment picker row: a label + the compact selector ("No Environment" +
+	// each environment + "Manage Environments…").
+	envRow := container.NewBorder(nil, nil,
+		widget.NewLabel("Env"), nil,
+		w.buildEnvSelector(),
+	)
+
+	return container.NewVBox(header, toolbar, envRow, widget.NewSeparator())
 }
 
 // refreshSidebarCount updates the request-count badge in the collection header.
@@ -185,14 +212,13 @@ func (w *Window) buildSidebar() {
 	}
 }
 
-// buildTabs creates the DocTabs holding open Request editors. Closing a Tab
-// detaches its editor; the underlying Request stays in the Collection.
+// buildTabs creates the custom browser-card tab strip holding open Request
+// editors. Closing a card detaches its editor; the underlying Request stays in
+// the Collection. Selecting a card refreshes the status bar.
 func (w *Window) buildTabs() {
-	w.tabs = container.NewDocTabs()
-	w.tabs.CloseIntercept = func(item *container.TabItem) {
-		w.closeTab(item)
-	}
-	w.tabs.OnSelected = func(*container.TabItem) { w.updateStatusBar() }
+	w.tabs = newTabStrip()
+	w.tabs.OnSelected = func(*tabCard) { w.updateStatusBar() }
+	w.tabs.OnClose = w.closeTab
 }
 
 // openRequestTab opens (or re-selects) the Request at Collection index idx as a
@@ -211,18 +237,19 @@ func (w *Window) openRequestTab(idx int) {
 	w.tabs.Select(rt.tab)
 }
 
-// closeTab removes a Tab and forgets its editor. Called from CloseIntercept.
-func (w *Window) closeTab(item *container.TabItem) {
+// closeTab removes a card and forgets its editor. Called from the strip's
+// OnClose when a card's "×" is tapped.
+func (w *Window) closeTab(card *tabCard) {
 	closedIdx := -1
 	for idx, rt := range w.openTabs {
-		if rt.tab == item {
+		if rt.tab == card {
 			rt.cancelInFlight()
 			delete(w.openTabs, idx)
 			closedIdx = idx
 			break
 		}
 	}
-	w.tabs.Remove(item)
+	w.tabs.Remove(card)
 	// Drop the sidebar selection if it pointed at the closed tab, so its row can
 	// be clicked again to reopen it — widget.List.Select no-ops on the already-
 	// selected row, which would otherwise leave the request un-reopenable.
@@ -259,8 +286,7 @@ func (w *Window) commitRequest(idx int, req model.Request) {
 	w.markDirty()
 	w.sidebar.Refresh()
 	if rt, ok := w.openTabs[idx]; ok {
-		rt.tab.Text = tabLabel(req, rt.dirty)
-		w.tabs.Refresh()
+		rt.tab.setRequest(req.Method, req.DisplayName(), rt.dirty)
 	}
 }
 
@@ -347,6 +373,7 @@ func (w *Window) buildMenu() {
 	)
 	collMenu := fyne.NewMenu("Collection",
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
+		fyne.NewMenuItem("Environments…", w.showEnvironmentManager),
 	)
 	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
 	// system application menu (the one named after the app) — and "About" replaces
@@ -622,32 +649,15 @@ func (r *verbRow) set(req model.Request, selected bool) {
 	r.accent.Refresh()
 }
 
-// tabTitle is the label shown on a Request's Tab.
-func tabTitle(req model.Request) string {
-	t := req.DisplayName()
-	if t == "" {
-		return "Untitled"
-	}
-	return t
-}
-
-// tabLabel is the DocTab text: a leading ● when the tab has unsaved edits.
-func tabLabel(req model.Request, dirty bool) string {
-	if dirty {
-		return "● " + tabTitle(req)
-	}
-	return tabTitle(req)
-}
-
 // clearTabsDirty drops the unsaved marker from every open tab (called on save).
 func (w *Window) clearTabsDirty() {
 	for idx, rt := range w.openTabs {
 		rt.dirty = false
 		if idx >= 0 && idx < len(w.coll.Requests) {
-			rt.tab.Text = tabLabel(w.coll.Requests[idx], false)
+			req := w.coll.Requests[idx]
+			rt.tab.setRequest(req.Method, req.DisplayName(), false)
 		}
 	}
-	w.tabs.Refresh()
 }
 
 // ---- Bottom status bar ----
@@ -674,7 +684,7 @@ func (w *Window) buildStatusBar() fyne.CanvasObject {
 	return container.NewStack(bg, container.NewPadded(bar))
 }
 
-// activeTab returns the requestTab whose DocTab is currently selected (nil if
+// activeTab returns the requestTab whose card is currently selected (nil if
 // none is open).
 func (w *Window) activeTab() *requestTab {
 	sel := w.tabs.Selected()
