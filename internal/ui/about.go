@@ -21,6 +21,7 @@ func (a *App) showAboutDialog(parent fyne.Window) {
 	logo.SetMinSize(fyne.NewSize(96, 96))
 
 	title := widget.NewLabelWithStyle("Yon", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	thaiName := widget.NewLabelWithStyle("(โยน)", fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
 
 	versionText := "Development build"
 	if v := currentVersion(); v != "" {
@@ -47,6 +48,7 @@ func (a *App) showAboutDialog(parent fyne.Window) {
 	content := container.NewVBox(
 		container.NewCenter(logo),
 		title,
+		thaiName,
 		version,
 		slogan,
 		widget.NewSeparator(),
