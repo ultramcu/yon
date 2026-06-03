@@ -412,10 +412,18 @@ func (w *Window) finishClose() {
 
 // saveShortcut / saveAsShortcut are the Save (Cmd/Ctrl+S) and Save As
 // (Cmd/Ctrl+Shift+S) accelerators. Unlike Find / Copy / Paste (see buildMainMenu),
-// Save can safely be a menu accelerator: nothing in a focused Entry or pop-out
-// window binds Cmd+S, so there is no shortcut to hijack — and a menu accelerator
-// (unlike a canvas shortcut) still fires while a text field is focused, which is
-// exactly when the user reaches for Save.
+// Save is a menu accelerator: nothing in a focused Entry or pop-out window binds
+// Cmd+S, so there is no shortcut to hijack — and a menu accelerator (unlike a
+// canvas shortcut) still fires while a text field is focused, which is exactly
+// when the user reaches for Save.
+//
+// Known macOS limitation (same app-global behaviour noted on the Edit menu): the
+// native menu is bound to the window that last called SetMainMenu, so with
+// several collection windows open Cmd+S can route to that window's save() rather
+// than the front one's. It is acceptable here because Save/Save As are
+// non-destructive and each acts on its own window's file; the front window is
+// usually the most recently shown. A focus-time SetMainMenu rebuild would remove
+// even this edge.
 var (
 	saveShortcut   = &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierShortcutDefault}
 	saveAsShortcut = &desktop.CustomShortcut{KeyName: fyne.KeyS, Modifier: fyne.KeyModifierShortcutDefault | fyne.KeyModifierShift}
@@ -820,7 +828,22 @@ func urlPathOf(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if u, err := url.Parse(raw); err == nil && u.Path != "" {
+	// With a scheme, parse normally and take the path component.
+	if strings.Contains(raw, "://") {
+		if u, err := url.Parse(raw); err == nil && u.Path != "" {
+			return u.Path
+		}
+		return raw
+	}
+	// Already a bare path.
+	if strings.HasPrefix(raw, "/") {
+		return raw
+	}
+	// No scheme (e.g. a {{server}} value without https://): parse as an authority
+	// "host[:port]/path" so the status bar shows just the path, not host+path.
+	// Falls back to the raw string when it isn't a parseable authority (e.g. an
+	// unresolved {{template}}).
+	if u, err := url.Parse("//" + raw); err == nil && u.Path != "" {
 		return u.Path
 	}
 	return raw
