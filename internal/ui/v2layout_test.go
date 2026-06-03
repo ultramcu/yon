@@ -102,17 +102,17 @@ func TestRequestTab_BadgeInitialAndRefresh(t *testing.T) {
 	w.openRequestTab(0)
 	rt := w.openTabs[0]
 
-	if rt.paramsTab.Text != "Params 2" {
-		t.Errorf("initial Params badge = %q, want %q", rt.paramsTab.Text, "Params 2")
+	if rt.paramsSeg.label != "Params 2" {
+		t.Errorf("initial Params badge = %q, want %q", rt.paramsSeg.label, "Params 2")
 	}
-	if rt.headerTab.Text != "Headers 1" {
-		t.Errorf("initial Headers badge = %q, want %q", rt.headerTab.Text, "Headers 1")
+	if rt.headerSeg.label != "Headers 1" {
+		t.Errorf("initial Headers badge = %q, want %q", rt.headerSeg.label, "Headers 1")
 	}
 
 	// Disable a param row and commit: the badge must drop to "Params 1".
 	rt.paramsTable.rows[0].enabled.SetChecked(false) // fires commit via OnChanged
-	if rt.paramsTab.Text != "Params 1" {
-		t.Errorf("after disabling a row, Params badge = %q, want %q", rt.paramsTab.Text, "Params 1")
+	if rt.paramsSeg.label != "Params 1" {
+		t.Errorf("after disabling a row, Params badge = %q, want %q", rt.paramsSeg.label, "Params 1")
 	}
 }
 

@@ -157,11 +157,11 @@ func TestTabBadgeInitialSeed(t *testing.T) {
 	w.openRequestTab(0)
 	rt := w.openTabs[0]
 
-	if rt.paramsTab.Text != "Params 2" {
-		t.Errorf("initial Params badge = %q, want %q", rt.paramsTab.Text, "Params 2")
+	if rt.paramsSeg.label != "Params 2" {
+		t.Errorf("initial Params badge = %q, want %q", rt.paramsSeg.label, "Params 2")
 	}
-	if rt.headerTab.Text != "Headers 1" {
-		t.Errorf("initial Headers badge = %q, want %q", rt.headerTab.Text, "Headers 1")
+	if rt.headerSeg.label != "Headers 1" {
+		t.Errorf("initial Headers badge = %q, want %q", rt.headerSeg.label, "Headers 1")
 	}
 }
 
@@ -186,11 +186,11 @@ func TestTabBadgeZeroPlainLabel(t *testing.T) {
 	w.openRequestTab(0)
 	rt := w.openTabs[0]
 
-	if rt.paramsTab.Text != "Params" {
-		t.Errorf("zero-count Params badge = %q, want plain %q", rt.paramsTab.Text, "Params")
+	if rt.paramsSeg.label != "Params" {
+		t.Errorf("zero-count Params badge = %q, want plain %q", rt.paramsSeg.label, "Params")
 	}
-	if rt.headerTab.Text != "Headers" {
-		t.Errorf("zero-count Headers badge = %q, want plain %q", rt.headerTab.Text, "Headers")
+	if rt.headerSeg.label != "Headers" {
+		t.Errorf("zero-count Headers badge = %q, want plain %q", rt.headerSeg.label, "Headers")
 	}
 }
 
@@ -214,12 +214,12 @@ func TestTabBadgeUpdatesOnToggle(t *testing.T) {
 	w.openRequestTab(0)
 	rt := w.openTabs[0]
 
-	if rt.paramsTab.Text != "Params 2" {
-		t.Fatalf("pre-toggle Params badge = %q, want %q", rt.paramsTab.Text, "Params 2")
+	if rt.paramsSeg.label != "Params 2" {
+		t.Fatalf("pre-toggle Params badge = %q, want %q", rt.paramsSeg.label, "Params 2")
 	}
 	rt.paramsTable.rows[0].enabled.SetChecked(false) // commit via OnChanged
-	if rt.paramsTab.Text != "Params 1" {
-		t.Errorf("after disabling one row, Params badge = %q, want %q", rt.paramsTab.Text, "Params 1")
+	if rt.paramsSeg.label != "Params 1" {
+		t.Errorf("after disabling one row, Params badge = %q, want %q", rt.paramsSeg.label, "Params 1")
 	}
 }
 
@@ -243,14 +243,14 @@ func TestTabBadgeUpdatesOnEdit(t *testing.T) {
 	w.openRequestTab(0)
 	rt := w.openTabs[0]
 
-	if rt.headerTab.Text != "Headers 1" {
-		t.Fatalf("pre-edit Headers badge = %q, want %q", rt.headerTab.Text, "Headers 1")
+	if rt.headerSeg.label != "Headers 1" {
+		t.Fatalf("pre-edit Headers badge = %q, want %q", rt.headerSeg.label, "Headers 1")
 	}
 	// Fill the empty row's key so it becomes enabled+present.
 	rt.headerTable.rows[1].key.SetText("X-New")
-	if rt.headerTab.Text != "Headers 2" {
+	if rt.headerSeg.label != "Headers 2" {
 		t.Errorf("after editing a row into existence, Headers badge = %q, want %q",
-			rt.headerTab.Text, "Headers 2")
+			rt.headerSeg.label, "Headers 2")
 	}
 }
 

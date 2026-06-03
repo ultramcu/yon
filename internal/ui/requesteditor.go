@@ -81,9 +81,9 @@ type requestTab struct {
 
 	// sub-tab items kept so their count badges ("Params 3"/"Headers 1") can be
 	// updated when rows change.
-	paramsTab *container.TabItem
-	headerTab *container.TabItem
-	subTabs   *container.AppTabs
+	paramsSeg *segButton
+	headerSeg *segButton
+	segTabs   *segTabs
 
 	response *responseView
 
@@ -163,21 +163,18 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.authEditor = newAuthEditor(req.Auth, true, func() { rt.commit() })
 	bodyPane := rt.buildBody(req)
 
-	rt.paramsTab = container.NewTabItem("Params", rt.paramsTable.container)
-	rt.headerTab = container.NewTabItem("Headers", rt.headerTable.container)
-	rt.subTabs = container.NewAppTabs(
-		rt.paramsTab,
-		rt.headerTab,
-		container.NewTabItem("Auth", container.NewVScroll(rt.authEditor.container)),
-		container.NewTabItem("Body", bodyPane),
-	)
+	rt.segTabs = newSegTabs()
+	rt.paramsSeg = rt.segTabs.Append("Params", rt.paramsTable.container)
+	rt.headerSeg = rt.segTabs.Append("Headers", rt.headerTable.container)
+	rt.segTabs.Append("Auth", container.NewVScroll(rt.authEditor.container))
+	rt.segTabs.Append("Body", bodyPane)
 	rt.refreshTabBadges() // initial counts from the seeded Request
 
 	editorTop := container.NewVBox(
 		rt.nameEntry,
 		topBar,
 	)
-	requestPane := container.NewBorder(editorTop, nil, nil, nil, rt.subTabs)
+	requestPane := container.NewBorder(editorTop, nil, nil, nil, rt.segTabs.object())
 
 	rt.response = newResponseView(w.win)
 
@@ -316,16 +313,13 @@ func tabBadge(base string, n int) string {
 }
 
 // refreshTabBadges updates the Params/Headers sub-tab titles with the current
-// enabled+present row counts. Safe to call before subTabs exists (no-op).
+// enabled+present row counts. Safe to call before the segments exist (no-op).
 func (rt *requestTab) refreshTabBadges() {
-	if rt.paramsTab == nil || rt.headerTab == nil {
+	if rt.paramsSeg == nil || rt.headerSeg == nil {
 		return
 	}
-	rt.paramsTab.Text = tabBadge("Params", enabledParamCount(rt.paramsTable.value()))
-	rt.headerTab.Text = tabBadge("Headers", enabledParamCount(rt.headerTable.value()))
-	if rt.subTabs != nil {
-		rt.subTabs.Refresh()
-	}
+	rt.paramsSeg.setLabel(tabBadge("Params", enabledParamCount(rt.paramsTable.value())))
+	rt.headerSeg.setLabel(tabBadge("Headers", enabledParamCount(rt.headerTable.value())))
 }
 
 // onSend toggles between starting a send and cancelling the in-flight one.
