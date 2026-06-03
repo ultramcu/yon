@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,6 +51,9 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/json", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, sampleJSON())
 	})
+	mux.HandleFunc("/xml", xmlEcho)
+	mux.HandleFunc("/html", htmlPage)
+	mux.HandleFunc("/soap", soapEnvelope)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -61,6 +65,7 @@ func newMux() *http.ServeMux {
 				"/get", "/post", "/put", "/delete", "/headers",
 				"/basic-auth/{user}/{pass}", "/bearer", "/status/{code}",
 				"/redirect", "/large", "/slow?seconds=N", "/json",
+				"/xml", "/html", "/soap",
 			},
 			"credentials": map[string]string{
 				"bearer": demoBearer, "basicUser": demoUser, "basicPass": demoPassword,
@@ -156,6 +161,46 @@ func flatten(m map[string][]string) map[string]string {
 	}
 	return out
 }
+
+// xmlEcho returns an XML document as application/xml. When the request carries a
+// body (e.g. an XML request body sent from Yon) it echoes that body back so the
+// payload round-trips; otherwise it returns a sample catalog document. The sample
+// is minified so Yon's Pretty view (and the Format button) have something to
+// re-indent, and it includes a comment, attributes, an xml:lang attribute, nested
+// elements and UTF-8 text.
+func xmlEcho(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	w.Header().Set("Content-Type", "application/xml")
+	w.Header().Set("X-Yon-Testserver", "1")
+	w.WriteHeader(http.StatusOK)
+	if len(bytes.TrimSpace(body)) > 0 {
+		_, _ = w.Write(body)
+		return
+	}
+	_, _ = io.WriteString(w, sampleXML)
+}
+
+// htmlPage returns a small HTML document as text/html (exercises Yon's HTML
+// syntax highlighting).
+func htmlPage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Yon-Testserver", "1")
+	_, _ = io.WriteString(w, sampleHTML)
+}
+
+// soapEnvelope returns a SOAP 1.1 envelope as text/xml (exercises namespace
+// prefixes — soap:, m: — in Yon's XML formatter and highlighter).
+func soapEnvelope(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	w.Header().Set("X-Yon-Testserver", "1")
+	_, _ = io.WriteString(w, sampleSOAP)
+}
+
+const sampleXML = `<?xml version="1.0" encoding="UTF-8"?><!-- Yon testserver sample catalog --><catalog><book id="bk101" xml:lang="en"><author>Ada Lovelace</author><title>Notes on the Analytical Engine</title><price currency="GBP">9.75</price><tags><tag>history</tag><tag>computing</tag></tags></book><book id="bk102" xml:lang="th"><author>สมชาย ใจดี</author><title>HTTP ฉบับโยน</title><price currency="THB">350</price></book></catalog>`
+
+const sampleHTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Yon testserver</title></head><body><h1>Hello from Yon</h1><p>Throw a request. <strong>Catch a response.</strong></p><ul><li>offline</li><li>fast</li></ul></body></html>`
+
+const sampleSOAP = `<?xml version="1.0"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Header/><soap:Body><m:GetPriceResponse xmlns:m="https://yon.example/prices"><m:Price currency="USD">42.00</m:Price></m:GetPriceResponse></soap:Body></soap:Envelope>`
 
 func sampleJSON() map[string]any {
 	return map[string]any{

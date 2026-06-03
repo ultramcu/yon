@@ -108,6 +108,11 @@ type responseView struct {
 	// fullBody is the complete response body, retained even when the display is
 	// truncated, so "Save to file" always writes everything.
 	fullBody []byte
+
+	// contentType is the response's Content-Type media type (lower-cased, params
+	// stripped), derived from the response headers in setResponse. It selects the
+	// Pretty-mode formatter and syntax highlighter: JSON, XML, HTML, or plain.
+	contentType string
 }
 
 // newResponseView builds an empty response pane bound to parent (used for the
@@ -270,20 +275,18 @@ func (rv *responseView) setPretty(p bool) {
 }
 
 // copyBody copies the full response body to the clipboard — pretty-printed when
-// in Pretty mode and the body is JSON, otherwise the raw bytes. No-op when there
-// is no body.
+// in Pretty mode (JSON indented, XML/XHTML reformatted), otherwise the raw bytes.
+// No-op when there is no body.
 func (rv *responseView) copyBody() {
 	if len(rv.fullBody) == 0 {
 		return
 	}
-	data := rv.fullBody
+	data := string(rv.fullBody)
 	if rv.pretty {
-		if indented, ok := prettyJSON(data); ok {
-			data = indented
-		}
+		data, _ = rv.prettyDisplay(rv.fullBody)
 	}
 	if app := fyne.CurrentApp(); app != nil {
-		app.Clipboard().SetContent(string(data))
+		app.Clipboard().SetContent(data)
 	}
 }
 
@@ -320,16 +323,17 @@ func (rv *responseView) closeFind() {
 	rv.renderBody()
 }
 
-// findDisplayText is the (capped, pretty-if-JSON) body text that find searches.
+// findDisplayText is the (capped, pretty-if-applicable) body text that find
+// searches. In Pretty mode it matches what renderBody shows: JSON indented,
+// XML/XHTML reformatted, otherwise the raw text.
 func (rv *responseView) findDisplayText() string {
 	body := rv.fullBody
 	if len(body) > maxDisplayBytes {
 		body = body[:maxDisplayBytes]
 	}
 	if rv.pretty {
-		if indented, ok := prettyJSON(body); ok {
-			return string(indented)
-		}
+		display, _ := rv.prettyDisplay(body)
+		return display
 	}
 	return string(body)
 }
@@ -344,6 +348,7 @@ func (rv *responseView) setPending() {
 	rv.copyBtn.Hide()
 	rv.popoutBtn.Hide()
 	rv.fullBody = nil
+	rv.contentType = ""
 	rv.clearBody()
 	rv.headersGrid.SetText("")
 }
@@ -358,6 +363,7 @@ func (rv *responseView) setError(err error) {
 	rv.copyBtn.Hide()
 	rv.popoutBtn.Hide()
 	rv.fullBody = nil
+	rv.contentType = ""
 	rv.clearBody()
 	rv.headersGrid.SetText("")
 }
@@ -365,6 +371,7 @@ func (rv *responseView) setError(err error) {
 // setResponse renders a completed Response.
 func (rv *responseView) setResponse(resp model.Response) {
 	rv.fullBody = resp.Body
+	rv.contentType = contentTypeOf(resp.Headers)
 	rv.copyBtn.Show()
 	rv.saveBtn.Show()
 	rv.popoutBtn.Show()
@@ -377,6 +384,19 @@ func (rv *responseView) setResponse(resp model.Response) {
 
 	rv.renderHeaders(resp.Headers)
 	rv.renderBody()
+}
+
+// contentTypeOf returns the Content-Type value from the response headers (the
+// first match, case-insensitive on the key), or "" when absent. The raw value is
+// returned verbatim; isXMLContentType / isHTMLContentType / isJSONContentType
+// lower-case it and strip any `; charset=…` parameter themselves.
+func contentTypeOf(headers []model.Param) string {
+	for _, h := range headers {
+		if strings.EqualFold(h.Key, "Content-Type") {
+			return h.Value
+		}
+	}
+	return ""
 }
 
 // renderHeaders writes the response headers into the left-column TextGrid,
@@ -413,6 +433,74 @@ func (rv *responseView) renderHeaders(headers []model.Param) {
 	rv.headersGrid.Refresh()
 }
 
+// bodyKind classifies a response body for the Pretty path: which formatter and
+// which syntax highlighter (if any) to use. It is derived from the Content-Type
+// and, for XML/HTML, whether the body actually reformats cleanly.
+type bodyKind int
+
+const (
+	kindText bodyKind = iota // no highlighting (plain SetText / line list)
+	kindJSON                 // prettyJSON + buildJSONRows
+	kindXML                  // formatXML + buildXMLRows
+	kindHTML                 // buildXMLRows tag highlighting, no reflow
+)
+
+// prettyDisplay computes the Pretty-mode display text for body and the highlight
+// kind to colour it with, dispatching on the response Content-Type:
+//
+//   - JSON (or a body that simply parses as JSON when the type is unknown) is
+//     indented with prettyJSON and coloured as JSON.
+//   - XML (isXMLContentType) is reformatted with formatXML; if it is well-formed
+//     it is re-indented and coloured as XML, otherwise the original text is shown
+//     and still tag-highlighted (kindXML over the raw text).
+//   - HTML (isHTMLContentType) gets the same tag highlighting but is never
+//     reflowed (HTML is often not well-formed XML); formatXML is attempted only
+//     so genuinely XHTML bodies indent, and a failure falls back to the original
+//     text, still tag-highlighted (kindHTML).
+//   - anything else is plain text (kindText).
+//
+// It returns the display string and the kind; the caller decides whether the
+// body is small enough to colour (large bodies fall back to the plain line list
+// regardless of kind, preserving the virtualization rule).
+func (rv *responseView) prettyDisplay(body []byte) (string, bodyKind) {
+	ct := rv.contentType
+
+	switch {
+	case isHTMLContentType(ct):
+		// HTML first: application/xhtml+xml satisfies isXMLContentType too, but
+		// HTML must not be forcibly reflowed. XHTML may reformat; plain HTML
+		// usually will not. Either way colour the markup, but never mangle it —
+		// show the original text on a formatXML failure.
+		if formatted, ok := formatXML(body); ok {
+			return string(formatted), kindHTML
+		}
+		return string(body), kindHTML
+
+	case isXMLContentType(ct):
+		if formatted, ok := formatXML(body); ok {
+			return string(formatted), kindXML
+		}
+		// Not well-formed: show as-is but still tag-highlight.
+		return string(body), kindXML
+
+	case ct == "" || isJSONContentType(ct):
+		// JSON content type, or unknown type that happens to be valid JSON
+		// (keeps the original "sniff JSON" behaviour for untyped bodies).
+		if indented, ok := prettyJSON(body); ok {
+			return string(indented), kindJSON
+		}
+		return string(body), kindText
+
+	default:
+		// A known, non-markup type (e.g. text/plain): no highlighting, but still
+		// honour a JSON body mislabelled by the server.
+		if indented, ok := prettyJSON(body); ok {
+			return string(indented), kindJSON
+		}
+		return string(body), kindText
+	}
+}
+
 // renderBody (re)renders the body honouring the Pretty/Raw toggle and the
 // 256 KB display cap. It is called on send completion and on toggle.
 func (rv *responseView) renderBody() {
@@ -430,15 +518,10 @@ func (rv *responseView) renderBody() {
 
 	pretty := rv.pretty
 	var display string
-	var coloured bool
+	kind := kindText
 
 	if pretty {
-		if indented, ok := prettyJSON(body); ok {
-			display = string(indented)
-			coloured = true
-		} else {
-			display = string(body)
-		}
+		display, kind = rv.prettyDisplay(body)
 	} else {
 		display = string(body)
 	}
@@ -447,17 +530,18 @@ func (rv *responseView) renderBody() {
 		// Large body in Pretty mode — the path the user reported as laggy. The
 		// expensive part is the TextGrid itself: parseRows calls runewidth on a
 		// freshly-allocated string per rune (~256K string allocations per 256 KB)
-		// and, when the JSON is valid, the colouring pass adds a style per token.
-		// Render into the lightweight virtualized List instead: only the on-screen
-		// lines become widgets, so cost is independent of body size. Syntax colour
-		// is dropped on this path (the trade-off); the view stays read-only,
-		// monospace and scrollable per the read-only-response rule. Raw mode keeps the plain TextGrid
-		// so a user can opt back into the exact-bytes grid view.
+		// and the colouring pass adds a style per token. Render into the
+		// lightweight virtualized List instead: only the on-screen lines become
+		// widgets, so cost is independent of body size. Syntax colour is dropped
+		// on this path (the trade-off) for JSON, XML and HTML alike; the view
+		// stays read-only, monospace and scrollable per the read-only-response
+		// rule. Raw mode keeps the plain TextGrid so a user can opt back into the
+		// exact-bytes grid view.
 		rv.showLargeBody(display)
 	} else {
 		// Small bodies, and Raw bodies of any size, keep the (optionally coloured)
 		// TextGrid path.
-		rv.showSmallBody(display, coloured)
+		rv.showSmallBody(display, kind)
 	}
 
 	if truncated {
@@ -471,18 +555,22 @@ func (rv *responseView) renderBody() {
 }
 
 // showSmallBody renders display into the TextGrid and makes it the visible Body
-// viewer (hiding the large-body List). For a coloured (valid-JSON) small body it
-// builds the styled rows in one pass via buildJSONRows (jsonpretty.go) and
-// assigns them directly, avoiding the SetText parse + per-token SetStyleRange
-// round-trip. A non-JSON body keeps plain SetText.
-func (rv *responseView) showSmallBody(display string, coloured bool) {
+// viewer (hiding the large-body List). For a coloured body it builds the styled
+// rows in one zero-allocation pass — buildJSONRows for JSON, buildXMLRows for
+// XML/HTML — and assigns them directly, avoiding the SetText parse + per-token
+// SetStyleRange round-trip. Plain-text bodies keep plain SetText.
+func (rv *responseView) showSmallBody(display string, kind bodyKind) {
 	rv.bodyLines = nil
 	rv.bodyList.Hide()
 
-	if coloured {
+	switch kind {
+	case kindJSON:
 		rv.bodyGrid.Rows = buildJSONRows(display)
 		rv.bodyGrid.Refresh()
-	} else {
+	case kindXML, kindHTML:
+		rv.bodyGrid.Rows = buildXMLRows(display)
+		rv.bodyGrid.Refresh()
+	default:
 		rv.bodyGrid.SetText(display)
 	}
 	rv.bodyList.Refresh()
@@ -568,9 +656,7 @@ func (rv *responseView) showPopout() {
 	}
 	text := string(body)
 	if rv.pretty {
-		if indented, ok := prettyJSON(body); ok {
-			text = string(indented)
-		}
+		text, _ = rv.prettyDisplay(body)
 	}
 
 	// Default view: a selectable Textbox (drag-select + copy). It intercepts

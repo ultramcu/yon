@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -14,21 +15,28 @@ import (
 	"github.com/ultramcu/yon/internal/yonner"
 )
 
-// methodOptions lists the v1 HTTP methods for the Method Select.
+// methodOptions lists the well-known HTTP methods offered in the Method
+// drop-down. The selector is editable, so the user may also type any other
+// (custom) verb.
 var methodOptions = []string{
 	string(model.MethodGet),
 	string(model.MethodPost),
 	string(model.MethodPut),
 	string(model.MethodDelete),
+	string(model.MethodPatch),
+	string(model.MethodHead),
+	string(model.MethodOptions),
 }
 
-// bodyTypeOptions lists the Body-type Select values, label → model.BodyType.
-var bodyTypeLabels = []string{"None", "JSON", "Text"}
+// bodyTypeLabels lists the Body-type Select values, label → model.BodyType.
+var bodyTypeLabels = []string{"None", "JSON", "XML", "Text"}
 
 func bodyTypeFromLabel(label string) model.BodyType {
 	switch label {
 	case "JSON":
 		return model.BodyJSON
+	case "XML":
+		return model.BodyXML
 	case "Text":
 		return model.BodyText
 	default:
@@ -40,6 +48,8 @@ func bodyTypeToLabel(t model.BodyType) string {
 	switch t {
 	case model.BodyJSON:
 		return "JSON"
+	case model.BodyXML:
+		return "XML"
 	case model.BodyText:
 		return "Text"
 	default:
@@ -59,7 +69,7 @@ type requestTab struct {
 
 	// editing widgets
 	nameEntry   *widget.Entry
-	methodSel   *widget.Select
+	methodSel   *widget.SelectEntry
 	urlEntry    *widget.Entry
 	paramsTable *kvTable
 	headerTable *kvTable
@@ -101,16 +111,25 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.nameEntry.SetText(req.Name)
 	rt.nameEntry.OnChanged = func(string) { rt.commit() }
 
-	// Build the Select with no handler, set its initial value, then wire OnChanged —
-	// otherwise SetSelected fires commit() before the Param/Header/Auth/Body widgets
+	// Editable method drop-down: the user can pick a well-known verb or type an
+	// arbitrary custom one. Set its initial value before wiring OnChanged —
+	// otherwise SetText fires commit() before the Param/Header/Auth/Body widgets
 	// below exist, dereferencing nil (panics on tab construction).
-	rt.methodSel = widget.NewSelect(methodOptions, nil)
+	rt.methodSel = widget.NewSelectEntry(methodOptions)
 	if req.Method == "" {
-		rt.methodSel.SetSelected(string(model.MethodGet))
+		rt.methodSel.SetText(string(model.MethodGet))
 	} else {
-		rt.methodSel.SetSelected(string(req.Method))
+		rt.methodSel.SetText(string(req.Method))
 	}
-	rt.methodSel.OnChanged = func(string) { rt.commit() }
+	rt.methodSel.OnChanged = func(s string) {
+		// Uppercase the verb in place so "patch" → "PATCH"; guard the SetText to
+		// avoid a redundant re-entrant change event.
+		if up := strings.ToUpper(s); up != s {
+			rt.methodSel.SetText(up)
+			return // SetText re-enters OnChanged with the uppercased value
+		}
+		rt.commit()
+	}
 
 	rt.urlEntry = widget.NewEntry()
 	rt.urlEntry.SetPlaceHolder("https://api.example.com/path")
@@ -168,11 +187,16 @@ func newRequestTab(w *Window, idx int) *requestTab {
 
 // buildBody constructs the Body sub-tab: a type Select plus a multiline Entry
 // (editing input may use an Entry per the read-only-response rule). The editor is hidden for None.
+// For XML a "Format" button pretty-indents the editor contents in place.
 func (rt *requestTab) buildBody(req model.Request) fyne.CanvasObject {
 	rt.bodyEntry = widget.NewMultiLineEntry()
 	rt.bodyEntry.SetText(req.Body.Content)
 	rt.bodyEntry.OnChanged = func(string) { rt.commit() }
 	rt.bodyEntry.Wrapping = fyne.TextWrapOff
+
+	// "Format" pretty-prints the XML body; only shown for the XML body type.
+	formatBtn := widget.NewButton("Format", rt.formatXMLBody)
+	formatBtn.Importance = widget.LowImportance
 
 	rt.bodyTypeSel = widget.NewSelect(bodyTypeLabels, func(label string) {
 		if label == "None" {
@@ -180,25 +204,44 @@ func (rt *requestTab) buildBody(req model.Request) fyne.CanvasObject {
 		} else {
 			rt.bodyEntry.Show()
 		}
+		if label == "XML" {
+			formatBtn.Show()
+		} else {
+			formatBtn.Hide()
+		}
 		rt.commit()
 	})
 	rt.bodyTypeSel.SetSelected(bodyTypeToLabel(req.Body.Type))
 	if req.Body.Type == model.BodyNone || req.Body.Type == "" {
 		rt.bodyEntry.Hide()
 	}
+	if req.Body.Type != model.BodyXML {
+		formatBtn.Hide()
+	}
 
 	return container.NewBorder(
-		container.NewHBox(widget.NewLabel("Body type:"), rt.bodyTypeSel),
+		container.NewHBox(widget.NewLabel("Body type:"), rt.bodyTypeSel, formatBtn),
 		nil, nil, nil,
 		rt.bodyEntry,
 	)
+}
+
+// formatXMLBody pretty-indents the current XML body in place using formatXML
+// (provided by xmlformat.go). On malformed input formatXML returns ok=false and
+// the editor is left untouched.
+func (rt *requestTab) formatXMLBody() {
+	out, ok := formatXML([]byte(rt.bodyEntry.Text))
+	if !ok {
+		return
+	}
+	rt.bodyEntry.SetText(string(out))
 }
 
 // current reads the editor widgets back into a model.Request.
 func (rt *requestTab) current() model.Request {
 	return model.Request{
 		Name:    rt.nameEntry.Text,
-		Method:  model.Method(rt.methodSel.Selected),
+		Method:  model.Method(strings.ToUpper(rt.methodSel.Text)),
 		URL:     rt.urlEntry.Text,
 		Params:  rt.paramsTable.value(),
 		Headers: rt.headerTable.value(),

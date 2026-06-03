@@ -29,13 +29,13 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 
 ## Features
 
-- **Methods:** GET · POST · PUT · DELETE
+- **Methods:** GET · POST · PUT · DELETE · PATCH · HEAD · OPTIONS — or type any custom verb
 - **Query parameters** and **headers** as toggleable key/value tables
 - **Auth:** None · Basic · Bearer — set a default on the collection and inherit or
   override it per request
-- **Body:** None · JSON (auto `Content-Type` + pretty) · Text
-- **Response viewer:** status · time · size · headers, with a **Pretty** (indented,
-  JSON syntax-coloured) / **Raw** toggle and one-click **Copy**; huge bodies render
+- **Body:** None · JSON (auto `Content-Type` + pretty) · XML (auto `Content-Type` + format) · Text
+- **Response viewer:** status · time · size · headers, with a **Pretty** (indented and
+  syntax-coloured for JSON, XML and HTML) / **Raw** toggle and one-click **Copy**; huge bodies render
   fast (virtualized) and are capped on screen with a *Save Output As…* escape hatch
 - **Find in response (⌘F / Ctrl+F):** search the body with match highlighting, a
   match counter, next/previous navigation, and Esc to close

@@ -15,16 +15,21 @@ import (
 	"time"
 )
 
-// Method is the HTTP verb of a Request. Yon v1 supports GET, POST, PUT and
-// DELETE.
+// Method is the HTTP verb of a Request. Yon ships well-known verbs as consts
+// but treats Method as a free-form string, so an arbitrary custom verb the user
+// types is sent verbatim.
 type Method string
 
-// Supported HTTP methods.
+// Well-known HTTP methods. Method is a string type, so a Request may also carry
+// any other (custom) verb not listed here.
 const (
-	MethodGet    Method = "GET"
-	MethodPost   Method = "POST"
-	MethodPut    Method = "PUT"
-	MethodDelete Method = "DELETE"
+	MethodGet     Method = "GET"
+	MethodPost    Method = "POST"
+	MethodPut     Method = "PUT"
+	MethodDelete  Method = "DELETE"
+	MethodPatch   Method = "PATCH"
+	MethodHead    Method = "HEAD"
+	MethodOptions Method = "OPTIONS"
 )
 
 // AuthKind identifies how a Request or Collection authenticates.
@@ -78,6 +83,9 @@ const (
 	BodyJSON BodyType = "json"
 	// BodyText means the body is raw text with no automatic Content-Type.
 	BodyText BodyType = "text"
+	// BodyXML means the body is XML; the sender adds an "application/xml"
+	// Content-Type unless one is already set.
+	BodyXML BodyType = "xml"
 )
 
 // Body is the payload of a Request. It is held on every Request regardless of

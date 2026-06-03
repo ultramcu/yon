@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2/test"
@@ -28,10 +27,11 @@ const validPostman = `{
   ]
 }`
 
-// patchPostman has one GET (supported) and one PATCH (unsupported) request, so
-// importing it produces a non-empty Report.SkippedRequests while still opening a
-// window for the GET.
-const patchPostman = `{
+// reportPostman has a GET whose URL uses a {{variable}} (kept literal and flagged
+// in Report.Notes) plus a PATCH request, so importing it returns a non-empty
+// Report while opening a window with BOTH requests — PATCH is now imported, not
+// skipped, since Yon supports arbitrary methods.
+const reportPostman = `{
   "info": {
     "name": "Mixed",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -42,7 +42,7 @@ const patchPostman = `{
       "request": {
         "method": "GET",
         "header": [],
-        "url": "https://api.example.com/list"
+        "url": "{{baseUrl}}/list"
       }
     },
     {
@@ -119,40 +119,38 @@ func TestImportCollectionData_BadJSON(t *testing.T) {
 }
 
 // TestImportCollectionData_ReportSurfaced asserts the lossy-import Report is
-// returned to the caller: an unsupported PATCH request is recorded in
-// SkippedRequests, while the window still opens with the supported GET.
+// returned to the caller: a {{variable}} in the source is flagged in Report.Notes,
+// while BOTH requests (including the PATCH, now a supported arbitrary method) are
+// imported into the opened window.
 func TestImportCollectionData_ReportSurfaced(t *testing.T) {
 	a := test.NewApp()
 	app := New(a)
 
-	w, report, err := app.ImportCollectionData([]byte(patchPostman))
+	w, report, err := app.ImportCollectionData([]byte(reportPostman))
 	if err != nil {
 		t.Fatalf("ImportCollectionData returned error: %v", err)
 	}
 	if w == nil {
-		t.Fatal("ImportCollectionData returned a nil window despite supported requests")
+		t.Fatal("ImportCollectionData returned a nil window despite valid requests")
 	}
 	t.Cleanup(w.win.Close)
 
-	if len(report.SkippedRequests) == 0 {
-		t.Fatal("report.SkippedRequests is empty, want an entry for the PATCH request")
+	if len(report.Notes) == 0 {
+		t.Fatal("report.Notes is empty, want a note for the {{variable}}")
+	}
+
+	// Arbitrary methods are now supported, so BOTH requests import (none skipped).
+	if got := len(w.coll.Requests); got != 2 {
+		t.Fatalf("imported request count = %d, want 2 (GET + PATCH)", got)
 	}
 	foundPatch := false
-	for _, s := range report.SkippedRequests {
-		if strings.Contains(s, "PATCH") {
+	for _, r := range w.coll.Requests {
+		if r.Method == model.MethodPatch {
 			foundPatch = true
 			break
 		}
 	}
 	if !foundPatch {
-		t.Fatalf("no SkippedRequests entry mentions PATCH: %v", report.SkippedRequests)
-	}
-
-	// The supported GET should still have been imported into the open window.
-	if got := len(w.coll.Requests); got != 1 {
-		t.Fatalf("imported request count = %d, want 1 (only the GET)", got)
-	}
-	if w.coll.Requests[0].Method != model.MethodGet {
-		t.Fatalf("surviving request method = %q, want %q", w.coll.Requests[0].Method, model.MethodGet)
+		t.Fatal("PATCH request should be imported (arbitrary methods supported), not skipped")
 	}
 }

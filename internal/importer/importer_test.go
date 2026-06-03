@@ -25,6 +25,16 @@ func reqByName(t *testing.T, coll model.Collection, name string) model.Request {
 	return model.Request{}
 }
 
+// reqNames returns the flattened names of every imported Request, for failure
+// messages.
+func reqNames(coll model.Collection) []string {
+	var names []string
+	for _, r := range coll.Requests {
+		names = append(names, r.Name)
+	}
+	return names
+}
+
 func mustImport(t *testing.T, data string) (model.Collection, Report) {
 	t.Helper()
 	coll, rep, err := Import([]byte(data))
@@ -262,6 +272,27 @@ func TestImport_Body(t *testing.T) {
 		}
 	})
 
+	t.Run("raw xml", func(t *testing.T) {
+		const js = `{
+		  "info": {"name": "C"},
+		  "item": [{
+		    "name": "RX",
+		    "request": {
+		      "method": "GET", "url": {"raw": "https://h/x"},
+		      "body": {"mode": "raw", "raw": "<a/>", "options": {"raw": {"language": "xml"}}}
+		    }
+		  }]
+		}`
+		coll, _ := mustImport(t, js)
+		r := reqByName(t, coll, "RX")
+		if r.Body.Type != model.BodyXML {
+			t.Errorf("Body.Type = %q, want xml", r.Body.Type)
+		}
+		if r.Body.Content != "<a/>" {
+			t.Errorf("Body.Content = %q, want %q", r.Body.Content, "<a/>")
+		}
+	})
+
 	t.Run("raw no language", func(t *testing.T) {
 		const js = `{
 		  "info": {"name": "C"},
@@ -350,9 +381,12 @@ func TestImport_Body(t *testing.T) {
 	})
 }
 
-// 7. Unsupported method: PATCH is skipped (not in Requests) and reported with
-// its full flattened name.
-func TestImport_UnsupportedMethodSkipped(t *testing.T) {
+// 7. Arbitrary methods are imported verbatim (uppercased), NOT skipped. Yon now
+// supports any HTTP verb, so a PATCH/HEAD/OPTIONS request must appear in the
+// imported Collection with its method intact and must NOT be reported as a
+// skipped "unsupported method". This pins the new spec and FAILS on the old
+// behaviour (where PATCH was dropped into Report.SkippedRequests).
+func TestImport_ArbitraryMethodsImported(t *testing.T) {
 	const js = `{
 	  "info": {"name": "C"},
 	  "item": [
@@ -362,28 +396,56 @@ func TestImport_UnsupportedMethodSkipped(t *testing.T) {
 	        {"name": "Patchy", "request": {"method": "PATCH", "url": {"raw": "https://h/p"}}}
 	      ]
 	    },
+	    {"name": "Heady", "request": {"method": "HEAD", "url": {"raw": "https://h/he"}}},
+	    {"name": "Opty", "request": {"method": "OPTIONS", "url": {"raw": "https://h/op"}}},
 	    {"name": "Okay", "request": {"method": "GET", "url": {"raw": "https://h/o"}}}
 	  ]
 	}`
 	coll, rep := mustImport(t, js)
 
-	for _, r := range coll.Requests {
-		if r.Method == "PATCH" {
-			t.Fatalf("PATCH request was not skipped: %#v", r)
+	// Nothing is skipped any more.
+	if len(rep.SkippedRequests) != 0 {
+		t.Errorf("SkippedRequests = %v, want empty (no method is unsupported)", rep.SkippedRequests)
+	}
+
+	// All four requests are present, in document order, methods intact.
+	wantOrder := []string{"Folder / Patchy", "Heady", "Opty", "Okay"}
+	if len(coll.Requests) != len(wantOrder) {
+		t.Fatalf("len(Requests) = %d, want %d (%v)", len(coll.Requests), len(wantOrder), reqNames(coll))
+	}
+	for i, want := range wantOrder {
+		if coll.Requests[i].Name != want {
+			t.Errorf("Requests[%d].Name = %q, want %q", i, coll.Requests[i].Name, want)
 		}
-		if r.Name == "Folder / Patchy" {
-			t.Fatalf("skipped request %q must not appear in Requests", r.Name)
-		}
 	}
-	if len(rep.SkippedRequests) != 1 {
-		t.Fatalf("len(SkippedRequests) = %d, want 1 (%v)", len(rep.SkippedRequests), rep.SkippedRequests)
+
+	// The PATCH request is present with Method == "PATCH".
+	if got := reqByName(t, coll, "Folder / Patchy").Method; got != model.MethodPatch {
+		t.Errorf("Patchy.Method = %q, want %q (PATCH must no longer be skipped)", got, model.MethodPatch)
 	}
-	entry := rep.SkippedRequests[0]
-	if !strings.Contains(entry, "PATCH") {
-		t.Errorf("SkippedRequests[0] = %q, want it to contain method PATCH", entry)
+	if got := reqByName(t, coll, "Heady").Method; got != model.MethodHead {
+		t.Errorf("Heady.Method = %q, want %q", got, model.MethodHead)
 	}
-	if !strings.Contains(entry, "Folder / Patchy") {
-		t.Errorf("SkippedRequests[0] = %q, want it to contain the full name %q", entry, "Folder / Patchy")
+	if got := reqByName(t, coll, "Opty").Method; got != model.MethodOptions {
+		t.Errorf("Opty.Method = %q, want %q", got, model.MethodOptions)
+	}
+}
+
+// 7b. A lower-case method in the source JSON is imported uppercased.
+func TestImport_MethodUppercased(t *testing.T) {
+	const js = `{
+	  "info": {"name": "C"},
+	  "item": [
+	    {"name": "L", "request": {"method": "patch", "url": {"raw": "https://h/p"}}}
+	  ]
+	}`
+	coll, rep := mustImport(t, js)
+
+	if len(rep.SkippedRequests) != 0 {
+		t.Errorf("SkippedRequests = %v, want empty", rep.SkippedRequests)
+	}
+	if got := reqByName(t, coll, "L").Method; got != model.MethodPatch {
+		t.Errorf("Method = %q, want %q (must be uppercased)", got, model.MethodPatch)
 	}
 }
 

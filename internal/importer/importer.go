@@ -1,9 +1,10 @@
 // Package importer imports Collection v2.1 JSON documents into Yon's
 // own model.Collection. The source format has a richer data model than Yon, so the import
-// is lossy: nested folders are flattened into "Folder / Request" names,
-// unsupported HTTP methods are skipped, and unsupported auth/body kinds are
-// downgraded. A Report records everything that was skipped or downgraded so the
-// caller can show the user what changed.
+// is lossy: nested folders are flattened into "Folder / Request" names and
+// unsupported auth/body kinds are downgraded. (HTTP methods are imported
+// verbatim — Yon accepts arbitrary verbs — so none are skipped.) A Report
+// records everything that was skipped or downgraded so the caller can show the
+// user what changed.
 //
 // It depends only on the standard library and model, never on Fyne or any
 // networking package (see the UI-free-core rule).
@@ -22,11 +23,13 @@ import (
 // Report summarizes the losses incurred while importing a collection.
 //
 // SkippedRequests lists requests that were dropped entirely (one entry per
-// request, not deduped), e.g. "Folder / Login — unsupported method PATCH".
-// Notes lists non-fatal downgrade messages (e.g. a form-data body dropped);
-// Notes are deduped so an identical message appears at most once.
+// request, not deduped). Yon now imports every request with its method
+// verbatim, so the importer no longer populates this; it remains for callers
+// and any future skip reasons. Notes lists non-fatal downgrade messages (e.g. a
+// form-data body dropped); Notes are deduped so an identical message appears at
+// most once.
 type Report struct {
-	SkippedRequests []string // entries like "Folder / Login — unsupported method PATCH"
+	SkippedRequests []string // requests dropped entirely (currently never populated)
 	Notes           []string // deduped non-fatal downgrade notes
 }
 
@@ -182,12 +185,9 @@ func walk(nodes []pmNode, prefix []string, coll *model.Collection, report *Repor
 			continue
 		}
 
+		// Yon supports arbitrary methods, so import the verb verbatim
+		// (uppercased) — no method is ever skipped.
 		method := strings.ToUpper(node.Request.Method)
-		if !isSupportedMethod(method) {
-			report.SkippedRequests = append(report.SkippedRequests,
-				fmt.Sprintf("%s — unsupported method %s", fullName, method))
-			continue
-		}
 
 		req := model.Request{
 			Name:   fullName,
@@ -206,16 +206,6 @@ func walk(nodes []pmNode, prefix []string, coll *model.Collection, report *Repor
 		req.Body = parseBody(node.Request.Body, fullName, report)
 
 		coll.Requests = append(coll.Requests, req)
-	}
-}
-
-// isSupportedMethod reports whether method is one of the four Yon verbs.
-func isSupportedMethod(method string) bool {
-	switch model.Method(method) {
-	case model.MethodGet, model.MethodPost, model.MethodPut, model.MethodDelete:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -339,8 +329,13 @@ func parseBody(body *pmBody, owner string, report *Report) model.Body {
 
 	switch body.Mode {
 	case "raw":
-		if body.Options != nil && body.Options.Raw != nil && body.Options.Raw.Language == "json" {
-			return model.Body{Type: model.BodyJSON, Content: body.Raw}
+		if body.Options != nil && body.Options.Raw != nil {
+			switch body.Options.Raw.Language {
+			case "json":
+				return model.Body{Type: model.BodyJSON, Content: body.Raw}
+			case "xml":
+				return model.Body{Type: model.BodyXML, Content: body.Raw}
+			}
 		}
 		return model.Body{Type: model.BodyText, Content: body.Raw}
 	case "urlencoded":

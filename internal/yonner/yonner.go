@@ -61,8 +61,8 @@ const headerContentType = "Content-Type"
 //     wins and Auth is not applied;
 //   - sends Body as-is for any Method (including GET) when Body.Type is not
 //     "none" and Body.Content is non-empty, and for JSON bodies adds
-//     Content-Type: application/json only when the user has not already set a
-//     Content-Type header.
+//     Content-Type: application/json (XML bodies add application/xml) only when
+//     the user has not already set a Content-Type header.
 func Build(ctx context.Context, req model.Request, coll model.Collection) (*http.Request, error) {
 	// Build the URL with enabled query params appended in order (see requestURL,
 	// shared with ToCurl).
@@ -119,6 +119,11 @@ func Build(ctx context.Context, req model.Request, coll model.Collection) (*http
 	// JSON auto Content-Type, only when present and not user-overridden.
 	if hasBody && req.Body.Type == model.BodyJSON && !userSetContentType {
 		httpReq.Header.Set(headerContentType, "application/json")
+	}
+
+	// XML auto Content-Type, only when present and not user-overridden.
+	if hasBody && req.Body.Type == model.BodyXML && !userSetContentType {
+		httpReq.Header.Set(headerContentType, "application/xml")
 	}
 
 	return httpReq, nil

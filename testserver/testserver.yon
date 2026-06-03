@@ -157,7 +157,7 @@
       }
     },
     {
-      "name": "Large body (\u003e 256 KB, truncates)",
+      "name": "Large body (> 256 KB, truncates)",
       "method": "GET",
       "url": "http://localhost:7878/large",
       "auth": {
@@ -194,6 +194,63 @@
       },
       "body": {
         "type": "none"
+      }
+    },
+    {
+      "name": "GET — XML response",
+      "method": "GET",
+      "url": "http://localhost:7878/xml",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "POST — XML body",
+      "method": "POST",
+      "url": "http://localhost:7878/xml",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "xml",
+        "content": "<order id=\"1001\"><item sku=\"A1\">Widget</item><item sku=\"B2\">Gadget</item></order>"
+      }
+    },
+    {
+      "name": "GET — HTML page",
+      "method": "GET",
+      "url": "http://localhost:7878/html",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "GET — SOAP envelope",
+      "method": "GET",
+      "url": "http://localhost:7878/soap",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "none"
+      }
+    },
+    {
+      "name": "PATCH — echo method",
+      "method": "PATCH",
+      "url": "http://localhost:7878/anything",
+      "auth": {
+        "kind": "none"
+      },
+      "body": {
+        "type": "json",
+        "content": "{\n  \"op\": \"replace\",\n  \"value\": 7\n}"
       }
     }
   ]

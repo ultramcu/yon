@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -173,5 +174,93 @@ func TestJSONSample(t *testing.T) {
 	}
 	if m["name"] != "Yon" {
 		t.Fatalf("sample JSON missing fields: %v", m)
+	}
+}
+
+func TestXML_ReturnsSampleDocument(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/xml")
+	if err != nil {
+		t.Fatalf("GET /xml: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/xml" {
+		t.Fatalf("Content-Type = %q, want application/xml", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{"<catalog>", "<book", `xml:lang="en"`, "<!--"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("sample XML missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestXML_EchoesRequestBody(t *testing.T) {
+	srv, c := newTestServer(t)
+	const sent = `<note><to>Yon</to></note>`
+	resp, err := c.Post(srv.URL+"/xml", "application/xml", strings.NewReader(sent))
+	if err != nil {
+		t.Fatalf("POST /xml: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != sent {
+		t.Fatalf("echoed body = %q, want %q", body, sent)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/xml" {
+		t.Fatalf("Content-Type = %q, want application/xml", ct)
+	}
+}
+
+func TestHTML_ReturnsHTML(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/html")
+	if err != nil {
+		t.Fatalf("GET /html: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "<html") {
+		t.Errorf("HTML body missing <html>:\n%s", body)
+	}
+}
+
+func TestSOAP_ReturnsNamespacedEnvelope(t *testing.T) {
+	srv, c := newTestServer(t)
+	resp, err := c.Get(srv.URL + "/soap")
+	if err != nil {
+		t.Fatalf("GET /soap: %v", err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/xml") {
+		t.Fatalf("Content-Type = %q, want text/xml", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	for _, want := range []string{"soap:Envelope", "xmlns:soap=", "m:GetPriceResponse"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("SOAP body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestPatch_MethodReflected(t *testing.T) {
+	srv, c := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/anything", strings.NewReader("{}"))
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /anything: %v", err)
+	}
+	defer resp.Body.Close()
+	var m map[string]any
+	body, _ := io.ReadAll(resp.Body)
+	_ = json.Unmarshal(body, &m)
+	if m["method"] != "PATCH" {
+		t.Fatalf("method = %v, want PATCH", m["method"])
 	}
 }
