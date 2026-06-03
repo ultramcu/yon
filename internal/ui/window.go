@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"net/url"
 	"path/filepath"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -302,6 +303,34 @@ func (w *Window) markDirty() {
 	}
 }
 
+// renameCollection sets the Collection's own Name (stored in the .yon, used by
+// the window title and sidebar header in preference to the file name), marks the
+// window dirty, and refreshes the title/header. An empty name clears it, so the
+// display falls back to the file name (see collectionDisplayName). updateTitle is
+// called unconditionally so the header updates even when the window was already
+// dirty.
+func (w *Window) renameCollection(name string) {
+	w.coll.Name = strings.TrimSpace(name)
+	w.dirty = true
+	w.updateTitle()
+}
+
+// showRenameCollection opens a dialog to edit the Collection's Name, prefilled
+// with the current name. Saving applies it via renameCollection.
+func (w *Window) showRenameCollection() {
+	entry := widget.NewEntry()
+	entry.SetText(w.coll.Name)
+	entry.SetPlaceHolder("Collection name")
+	entry.OnSubmitted = nil // Enter is handled by the dialog's confirm button
+	dialog.ShowForm("Rename Collection", "Save", "Cancel",
+		[]*widget.FormItem{widget.NewFormItem("Name", entry)},
+		func(ok bool) {
+			if ok {
+				w.renameCollection(entry.Text)
+			}
+		}, w.win)
+}
+
 // collectionDisplayName is the human-readable name shown for a Collection in
 // the window title and the sidebar header: the Collection's own Name, else the
 // file's base name when it was loaded/saved to disk, else "Untitled".
@@ -409,6 +438,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("Find…", w.openFindActive),
 	)
 	collMenu := fyne.NewMenu("Collection",
+		fyne.NewMenuItem("Rename Collection…", w.showRenameCollection),
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 		fyne.NewMenuItem("Environments…", w.showEnvironmentManager),
 	)
