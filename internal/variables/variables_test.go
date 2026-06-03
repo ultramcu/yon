@@ -75,6 +75,23 @@ func TestLookup_SecretValueFromSecretsMap(t *testing.T) {
 	}
 }
 
+// Regression: the UI builds Scope with Secrets == nil and relies on
+// store.LoadEnvironments having merged the .env secret into Variable.Value. A
+// secret must then resolve to that Value, not to the empty Secrets map (which
+// previously made every secret resolve to "" — e.g. token= in a built cURL).
+func TestLookup_SecretValueFromVariableWhenSecretsNil(t *testing.T) {
+	sc := Scope{
+		Env:     env(model.Variable{Key: "token", Value: "s3cret", Enabled: true, Secret: true}),
+		Secrets: nil,
+	}
+	if got, ok := sc.Lookup("token"); !ok || got != "s3cret" {
+		t.Fatalf("Lookup(token) = %q,%v; want \"s3cret\",true (secret from Value when Secrets nil)", got, ok)
+	}
+	if got := sc.Resolve("token={{token}}"); got != "token=s3cret" {
+		t.Fatalf("Resolve = %q; want %q", got, "token=s3cret")
+	}
+}
+
 // 3. Resolve embedded ---------------------------------------------------------
 
 func TestResolve_Embedded(t *testing.T) {

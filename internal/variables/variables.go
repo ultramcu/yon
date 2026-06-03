@@ -43,15 +43,21 @@ func (sc Scope) Lookup(key string) (string, bool) {
 }
 
 // lookupIn scans vars for the first enabled Variable whose Key matches key and
-// returns its effective value. A Secret variable resolves to secrets[key]
-// (blank when absent); a normal variable resolves to its own Value.
+// returns its effective value. A Secret variable resolves to secrets[key] when
+// that key is present in the Secrets map; otherwise it falls back to the
+// Variable's own Value. This supports both flows: the UI builds the Scope with a
+// nil Secrets map and relies on store.LoadEnvironments having merged the .env
+// secret into Variable.Value, while a caller that supplies a Secrets map keeps
+// the secret out of the Variable. A normal variable resolves to its own Value.
 func lookupIn(vars []model.Variable, key string, secrets map[string]string) (string, bool) {
 	for _, v := range vars {
 		if !v.Enabled || v.Key != key {
 			continue
 		}
 		if v.Secret {
-			return secrets[key], true
+			if s, ok := secrets[key]; ok {
+				return s, true
+			}
 		}
 		return v.Value, true
 	}
