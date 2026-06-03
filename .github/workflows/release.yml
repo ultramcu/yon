@@ -68,7 +68,27 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           case "${{ matrix.target }}" in
-            darwin)  zip -r "dist/Yon-${GITHUB_REF_NAME}-macos-universal.zip" Yon.app ;;
+            darwin)
+              # Ship a drag-to-install .dmg: it mounts showing Yon.app next to an
+              # Applications shortcut, so the user just drags the app across.
+              DMG="dist/Yon-${GITHUB_REF_NAME}-macos.dmg"
+              brew install create-dmg
+              create-dmg \
+                --volname "Yon" \
+                --window-size 600 380 \
+                --icon-size 120 \
+                --icon "Yon.app" 150 190 \
+                --app-drop-link 450 190 \
+                --hide-extension "Yon.app" \
+                "$DMG" "Yon.app" || {
+                  echo "create-dmg failed — building a plain drag-install .dmg"
+                  rm -f "$DMG"
+                  mkdir -p dmgstage
+                  cp -R Yon.app dmgstage/
+                  ln -s /Applications dmgstage/Applications
+                  hdiutil create -volname "Yon" -srcfolder dmgstage -ov -format UDZO "$DMG"
+                }
+              ;;
             windows) 7z a  "dist/Yon-${GITHUB_REF_NAME}-windows.zip" Yon.exe ;;
             linux)   mv Yon.tar.xz "dist/Yon-${GITHUB_REF_NAME}-linux.tar.xz" ;;
           esac

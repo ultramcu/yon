@@ -66,7 +66,7 @@ Download a prebuilt build from the [latest release](https://github.com/ultramcu/
 
 | Platform | Download |
 |---|---|
-| **macOS** (universal — Apple Silicon + Intel) | `Yon-*-macos-universal.zip` |
+| **macOS** (universal — Apple Silicon + Intel) | `Yon-*-macos.dmg` — open it and drag **Yon** into **Applications** |
 | **Windows** | `Yon-*-windows.zip` |
 | **Linux** | `Yon-*-linux.tar.xz` |
 
