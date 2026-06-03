@@ -203,6 +203,10 @@ func (w *Window) buildSidebar() {
 			// Right-clicking a row offers Delete; confirmDeleteRequest prompts before
 			// it removes the Request from the Collection.
 			row.onDelete = w.confirmDeleteRequest
+			// Left-clicking a row opens it. Route through sidebar.Select (not
+			// openRequestTab) so OnSelected runs the full programmatic path:
+			// selectedID update + accent repaint + openRequestTab.
+			row.onTap = func(id int) { w.sidebar.Select(id) }
 			return row
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
@@ -787,9 +791,11 @@ type verbRow struct {
 
 	// id is the Collection request index this row currently shows; set() rebinds
 	// it per id in UpdateItem. onDelete (wired by buildSidebar) is invoked with id
-	// when the row's Delete context-menu item is chosen.
+	// when the row's Delete context-menu item is chosen. onTap is invoked with id
+	// on a primary (left) click — see Tapped for why the row must be Tappable.
 	id       int
 	onDelete func(id int)
+	onTap    func(id int)
 }
 
 // newVerbRow builds an empty row; set() fills it per Request in UpdateItem.
@@ -838,6 +844,19 @@ func (r *verbRow) set(id widget.ListItemID, req model.Request, selected bool) {
 		r.accent.FillColor = color.Transparent
 	}
 	r.accent.Refresh()
+}
+
+// Tapped handles a primary (left) click by invoking onTap with this row's
+// request index. verbRow MUST implement fyne.Tappable: it already implements
+// SecondaryTappable (for Delete), and the glfw tap router resolves a click to
+// the deepest object implementing ANY tappable interface. Without Tapped, a
+// left click would resolve to this row — which has no primary handler — and
+// shadow the enclosing widget.List's own primary-tap selection, so rows would
+// never open. Routing through onTap (wired to sidebar.Select) restores that.
+func (r *verbRow) Tapped(*fyne.PointEvent) {
+	if r.onTap != nil {
+		r.onTap(r.id)
+	}
 }
 
 // TappedSecondary shows the row's right-click context menu — currently just
