@@ -198,12 +198,18 @@ func (w *Window) refreshSidebarCount() {
 func (w *Window) buildSidebar() {
 	w.sidebar = widget.NewList(
 		func() int { return len(w.coll.Requests) },
-		func() fyne.CanvasObject { return newVerbRow() },
+		func() fyne.CanvasObject {
+			row := newVerbRow()
+			// Right-clicking a row offers Delete; confirmDeleteRequest prompts before
+			// it removes the Request from the Collection.
+			row.onDelete = w.confirmDeleteRequest
+			return row
+		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id < 0 || id >= len(w.coll.Requests) {
 				return
 			}
-			o.(*verbRow).set(w.coll.Requests[id], id == w.selectedID)
+			o.(*verbRow).set(id, w.coll.Requests[id], id == w.selectedID)
 		},
 	)
 	w.sidebar.OnSelected = func(id widget.ListItemID) {
@@ -279,6 +285,75 @@ func (w *Window) addRequest() {
 	// Select via the sidebar (not openRequestTab directly) so the new row's
 	// selection + cyan accent stay in sync with the opened tab.
 	w.sidebar.Select(len(w.coll.Requests) - 1)
+}
+
+// confirmDeleteRequest asks the user to confirm removing the Request at idx, and
+// on confirm calls deleteRequest. The dialog names the Request so it's clear
+// which row is being removed. Wired to a verbRow's right-click Delete item.
+func (w *Window) confirmDeleteRequest(idx int) {
+	if idx < 0 || idx >= len(w.coll.Requests) {
+		return
+	}
+	name := w.coll.Requests[idx].DisplayName()
+	dialog.NewConfirm("Delete request",
+		fmt.Sprintf("Delete request %q?", name),
+		func(ok bool) {
+			if ok {
+				w.deleteRequest(idx)
+			}
+		}, w.win).Show()
+}
+
+// deleteRequest removes the Request at idx from the Collection and re-indexes the
+// index-keyed state that the removal shifts.
+//
+// openTabs and selectedID are keyed by slice index, so deleting Requests[idx]
+// shifts every later element down by one and those keys must move with them:
+//   - If a tab is open for idx, cancel its in-flight send and remove its card.
+//   - Rebuild openTabs so every key k > idx becomes k-1 (keys < idx unchanged),
+//     built into a fresh map so the shift can't clobber an existing entry.
+//   - selectedID: == idx → cleared to -1 (and unselected); > idx → decremented.
+//
+// No dialog here (confirmDeleteRequest owns the prompt) so it's directly testable.
+func (w *Window) deleteRequest(idx int) {
+	if idx < 0 || idx >= len(w.coll.Requests) {
+		return
+	}
+
+	// Drop the deleted request's open tab (if any), cancelling its in-flight send.
+	if rt, ok := w.openTabs[idx]; ok {
+		rt.cancelInFlight()
+		w.tabs.Remove(rt.tab)
+		delete(w.openTabs, idx)
+	}
+
+	// Remove the request from the slice, shifting later elements down by one.
+	w.coll.Requests = append(w.coll.Requests[:idx], w.coll.Requests[idx+1:]...)
+
+	// Re-key openTabs into a fresh map: keys < idx stay, keys > idx drop by one.
+	reindexed := make(map[int]*requestTab, len(w.openTabs))
+	for k, rt := range w.openTabs {
+		if k > idx {
+			k--
+		}
+		reindexed[k] = rt
+		rt.idx = k // keep each tab's own back-reference in sync
+	}
+	w.openTabs = reindexed
+
+	// Adjust the selection to follow the shift.
+	switch {
+	case w.selectedID == idx:
+		w.selectedID = -1
+		w.sidebar.Unselect(idx)
+	case w.selectedID > idx:
+		w.selectedID--
+	}
+
+	w.markDirty()
+	w.sidebar.Refresh()
+	w.refreshSidebarCount()
+	w.updateStatusBar()
 }
 
 // commitRequest writes an edited Request back into the Collection at idx and
@@ -692,6 +767,12 @@ type verbRow struct {
 	tag    *canvas.Text
 	name   *widget.Label
 	object fyne.CanvasObject
+
+	// id is the Collection request index this row currently shows; set() rebinds
+	// it per id in UpdateItem. onDelete (wired by buildSidebar) is invoked with id
+	// when the row's Delete context-menu item is chosen.
+	id       int
+	onDelete func(id int)
 }
 
 // newVerbRow builds an empty row; set() fills it per Request in UpdateItem.
@@ -723,9 +804,11 @@ func (r *verbRow) CreateRenderer() fyne.WidgetRenderer {
 	return widget.NewSimpleRenderer(r.object)
 }
 
-// set re-binds the row to req, recolouring the verb tag via methodColor and
-// showing the cyan accent bar when this row is the selected one.
-func (r *verbRow) set(req model.Request, selected bool) {
+// set re-binds the row to the Request at index id, recolouring the verb tag via
+// methodColor and showing the cyan accent bar when this row is the selected one.
+// id is remembered so the right-click Delete acts on the row's current Request.
+func (r *verbRow) set(id widget.ListItemID, req model.Request, selected bool) {
+	r.id = id
 	r.tag.Text = methodAbbrev(req.Method)
 	r.tag.Color = methodColor(req.Method)
 	r.tag.Refresh()
@@ -738,6 +821,22 @@ func (r *verbRow) set(req model.Request, selected bool) {
 		r.accent.FillColor = color.Transparent
 	}
 	r.accent.Refresh()
+}
+
+// TappedSecondary shows the row's right-click context menu — currently just
+// "Delete", which calls onDelete with this row's request index. Mirrors the
+// tappable-widget pattern used by tabClose/segButton.
+func (r *verbRow) TappedSecondary(e *fyne.PointEvent) {
+	if r.onDelete == nil {
+		return
+	}
+	id := r.id
+	menu := fyne.NewMenu("",
+		fyne.NewMenuItem("Delete", func() { r.onDelete(id) }),
+	)
+	if c := fyne.CurrentApp().Driver().CanvasForObject(r); c != nil {
+		widget.ShowPopUpMenuAtPosition(menu, c, e.AbsolutePosition)
+	}
 }
 
 // clearTabsDirty drops the unsaved marker from every open tab (called on save).

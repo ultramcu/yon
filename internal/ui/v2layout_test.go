@@ -24,7 +24,7 @@ func TestVerbRow_TagColourMatchesMethodColor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		r := newVerbRow()
-		r.set(model.Request{Method: tc.method, Name: "x"}, false)
+		r.set(0, model.Request{Method: tc.method, Name: "x"}, false)
 
 		if r.tag.Text != tc.tag {
 			t.Errorf("%s: tag text = %q, want %q", tc.method, r.tag.Text, tc.tag)
@@ -39,7 +39,7 @@ func TestVerbRow_TagColourMatchesMethodColor(t *testing.T) {
 // An unknown method must fall back to the slate verb colour, not crash.
 func TestVerbRow_UnknownMethodSlate(t *testing.T) {
 	r := newVerbRow()
-	r.set(model.Request{Method: model.Method("PATCH"), Name: "x"}, false)
+	r.set(0, model.Request{Method: model.Method("PATCH"), Name: "x"}, false)
 	if !colorsEqual(r.tag.Color, methodColor(model.Method("PATCH"))) {
 		t.Errorf("unknown method colour = %v, want slate %v", r.tag.Color, methodColorSlate)
 	}
@@ -48,11 +48,11 @@ func TestVerbRow_UnknownMethodSlate(t *testing.T) {
 // The selected row paints its cyan left accent; an unselected row is transparent.
 func TestVerbRow_SelectedAccent(t *testing.T) {
 	r := newVerbRow()
-	r.set(model.Request{Method: model.MethodGet}, true)
+	r.set(0, model.Request{Method: model.MethodGet}, true)
 	if !colorsEqual(r.accent.FillColor, verbRowAccent) {
 		t.Errorf("selected accent = %v, want cyan %v", r.accent.FillColor, verbRowAccent)
 	}
-	r.set(model.Request{Method: model.MethodGet}, false)
+	r.set(0, model.Request{Method: model.MethodGet}, false)
 	if !colorsEqual(r.accent.FillColor, color.Transparent) {
 		t.Errorf("unselected accent = %v, want transparent", r.accent.FillColor)
 	}

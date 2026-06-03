@@ -36,10 +36,10 @@ func rgbaEq(a, b color.Color) bool {
 // regression that paints every tag the same colour fails.
 func TestVerbTagColourTracksMethod(t *testing.T) {
 	getRow := newVerbRow()
-	getRow.set(model.Request{Method: model.MethodGet, Name: "query + header"}, false)
+	getRow.set(0, model.Request{Method: model.MethodGet, Name: "query + header"}, false)
 
 	postRow := newVerbRow()
-	postRow.set(model.Request{Method: model.MethodPost, Name: "JSON body"}, false)
+	postRow.set(1, model.Request{Method: model.MethodPost, Name: "JSON body"}, false)
 
 	if !rgbaEq(getRow.tag.Color, methodColor(model.MethodGet)) {
 		t.Errorf("GET tag colour = %v, want methodColor(GET) = %v",
@@ -67,7 +67,7 @@ func TestVerbTagTextUppercaseAbbrev(t *testing.T) {
 	}
 	for m, want := range cases {
 		r := newVerbRow()
-		r.set(model.Request{Method: m}, false)
+		r.set(0, model.Request{Method: m}, false)
 		if r.tag.Text != want {
 			t.Errorf("method %s: verb tag text = %q, want %q", m, r.tag.Text, want)
 		}
@@ -79,8 +79,8 @@ func TestVerbTagTextUppercaseAbbrev(t *testing.T) {
 // guards the virtualized-list recycle path the sidebar relies on.
 func TestVerbTagRecolourOnReuse(t *testing.T) {
 	r := newVerbRow()
-	r.set(model.Request{Method: model.MethodPost}, false)
-	r.set(model.Request{Method: model.MethodGet}, false)
+	r.set(0, model.Request{Method: model.MethodPost}, false)
+	r.set(0, model.Request{Method: model.MethodGet}, false)
 	if !rgbaEq(r.tag.Color, methodColor(model.MethodGet)) {
 		t.Errorf("after re-set to GET, tag colour = %v, want methodColor(GET) = %v",
 			r.tag.Color, methodColor(model.MethodGet))
