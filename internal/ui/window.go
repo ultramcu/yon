@@ -39,6 +39,17 @@ type Window struct {
 	sidebar *widget.List
 	tabs    *tabStrip
 
+	// filterQuery is the sidebar search box's current text, stored lower-cased and
+	// trimmed. It is DISPLAY-ONLY: it changes only which rows sidebarRows() emits
+	// (like folder collapse), never Collection.Requests, openTabs, selectedID, the
+	// dirty flag, or anything persisted. Empty means no filter (the full grouped
+	// view, collapse respected). See sidebarRows()/requestMatchesFilter.
+	filterQuery string
+
+	// filterEntry is the sidebar header's filter text box, kept so a clear control
+	// (and tests) can drive/reset it.
+	filterEntry *widget.Entry
+
 	// rows is the cached grouped display order (folder headers + request rows)
 	// the sidebar List renders. It is recomputed by refreshSidebar() on every
 	// change so the List's length() and updateItem() callbacks agree within a
@@ -199,15 +210,58 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 		w.buildEnvSelector(),
 	)
 
-	return container.NewVBox(header, toolbar, envRow, widget.NewSeparator())
+	return container.NewVBox(header, toolbar, envRow, w.buildSidebarFilter(), widget.NewSeparator())
+}
+
+// buildSidebarFilter builds the DISPLAY-ONLY request filter row: a search Entry
+// whose text filters which sidebar rows are shown, plus a "✕" clear button. Typing
+// updates w.filterQuery (lower-cased + trimmed) and reruns the existing refresh
+// path (refreshSidebar recomputes rows + the count badge); it never mutates the
+// Collection, openTabs, selectedID, or the dirty flag. See sidebarRows().
+func (w *Window) buildSidebarFilter() fyne.CanvasObject {
+	entry := widget.NewEntry()
+	entry.SetPlaceHolder("Filter requests…")
+	entry.OnChanged = func(s string) {
+		w.filterQuery = strings.ToLower(strings.TrimSpace(s))
+		// Display-only: just recompute/redraw the grouped rows + count badge.
+		w.refreshSidebar()
+	}
+	w.filterEntry = entry
+
+	clear := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
+		// Empties the box; the Entry's OnChanged clears w.filterQuery and refreshes.
+		entry.SetText("")
+	})
+	clear.Importance = widget.LowImportance
+
+	return container.NewBorder(nil, nil, nil, clear, entry)
 }
 
 // refreshSidebarCount updates the request-count badge in the collection header.
+// While a (display-only) filter is active AND the window is clean, it shows the
+// number of MATCHING requests instead of the total, so the badge reflects what's
+// visible; if dirty, it leaves the total as-is so the badge still signals size.
 func (w *Window) refreshSidebarCount() {
 	if w.sidebarCount == nil {
 		return
 	}
+	if w.filterQuery != "" && !w.dirty {
+		w.sidebarCount.SetText(fmt.Sprintf("%d", w.matchingRequestCount()))
+		return
+	}
 	w.sidebarCount.SetText(fmt.Sprintf("%d", len(w.coll.Requests)))
+}
+
+// matchingRequestCount returns how many requests match the current filterQuery
+// (all of them when the filter is empty). Display-only; reads nothing it mutates.
+func (w *Window) matchingRequestCount() int {
+	n := 0
+	for i := range w.coll.Requests {
+		if requestMatchesFilter(w.coll.Requests[i], w.filterQuery) {
+			n++
+		}
+	}
+	return n
 }
 
 // buildSidebar creates the grouped request list. It renders the order produced
@@ -673,16 +727,63 @@ func (w *Window) folderIndex(id string) int {
 	return -1
 }
 
+// requestMatchesFilter reports whether req matches the (already lower-cased,
+// trimmed) filter query q, by case-insensitive substring match against any of the
+// request's DisplayName(), URL, Method, or Name. q is expected pre-normalised by
+// the caller (lower-cased + trimmed). An empty q matches everything — callers gate
+// on q != "" so the unfiltered path is untouched, but defining empty as "matches"
+// keeps the helper total.
+func requestMatchesFilter(req model.Request, q string) bool {
+	if q == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(req.DisplayName()), q) ||
+		strings.Contains(strings.ToLower(req.URL), q) ||
+		strings.Contains(strings.ToLower(string(req.Method)), q) ||
+		strings.Contains(strings.ToLower(req.Name), q)
+}
+
 // sidebarRows computes the grouped display order for the sidebar. For each
 // folder in Collection.Folders order it emits a header row, then (unless the
 // folder is collapsed) that folder's requests in Requests-order; finally all
 // top-level requests (FolderID == "") in Requests-order. Each request row
-// carries its flat Collection.Requests index in ReqIdx, so Dev B can map a row
-// straight back to the request. A collapsed folder contributes only its header.
+// carries its flat Collection.Requests index in ReqIdx, so a row maps straight
+// back to the request. A collapsed folder contributes only its header.
+//
+// DISPLAY-ONLY filtering: when w.filterQuery != "", this emits only request rows
+// whose request matches the query (see requestMatchesFilter), keeping flat ReqIdx
+// values intact. A folder header is emitted only if that folder holds ≥1 matching
+// request, and such a folder is shown EXPANDED regardless of its Collapsed flag
+// (so the matches are visible); folders with no match are omitted. Filtering never
+// touches Collection.Requests, the dirty flag, openTabs, or selectedID — it only
+// changes which rows render, so all existing refresh paths just work. When
+// filterQuery == "" the output is exactly the unfiltered grouped view (collapse
+// respected, all requests shown).
 func (w *Window) sidebarRows() []sidebarRow {
+	q := w.filterQuery
+	filtering := q != ""
+
 	rows := make([]sidebarRow, 0, len(w.coll.Folders)+len(w.coll.Requests))
 	for fi := range w.coll.Folders {
 		f := w.coll.Folders[fi]
+
+		if filtering {
+			// Emit this folder only if it has a matching request, and show it
+			// expanded (ignore Collapsed) so the matches are visible.
+			folderRows := make([]sidebarRow, 0)
+			for i := range w.coll.Requests {
+				if w.coll.Requests[i].FolderID == f.ID && requestMatchesFilter(w.coll.Requests[i], q) {
+					folderRows = append(folderRows, sidebarRow{FolderID: f.ID, ReqIdx: i})
+				}
+			}
+			if len(folderRows) == 0 {
+				continue
+			}
+			rows = append(rows, sidebarRow{FolderID: f.ID, ReqIdx: -1, IsFolder: true})
+			rows = append(rows, folderRows...)
+			continue
+		}
+
 		rows = append(rows, sidebarRow{FolderID: f.ID, ReqIdx: -1, IsFolder: true})
 		if f.Collapsed {
 			continue
@@ -695,6 +796,9 @@ func (w *Window) sidebarRows() []sidebarRow {
 	}
 	for i := range w.coll.Requests {
 		if w.coll.Requests[i].FolderID == "" {
+			if filtering && !requestMatchesFilter(w.coll.Requests[i], q) {
+				continue
+			}
 			rows = append(rows, sidebarRow{ReqIdx: i})
 		}
 	}
