@@ -60,6 +60,11 @@ type Window struct {
 	// selectedID, which always stays a flat request index.
 	rows []sidebarRow
 
+	// rowHeight caches the uniform sidebar-row height (the List item template's
+	// MinSize height) used by the drag-drop hit-test to map a pointer Y to a row.
+	// 0 means "not computed yet"; sidebarRowHeight() fills it on first use.
+	rowHeight float32
+
 	// Bottom status bar (mockup-v9): the active tab's last response status/time/
 	// size on the left, its method · path on the right.
 	sbVersion *canvas.Text
@@ -290,6 +295,9 @@ func (w *Window) buildSidebar() {
 			it.req.onDelete = w.confirmDeleteRequest
 			it.req.moveMenu = w.moveToFolderMenu
 			it.req.onTap = func(reqIdx int) { w.selectByReqIdx(reqIdx) }
+			// Dragging a request row reorders it (incl. across folders): DragEnd
+			// hands us the dragged request and where the pointer ended up.
+			it.req.onDragEnd = w.handleRequestDrop
 			// Folder-row callbacks (only fired while the item shows its folderRow).
 			// A primary tap (header or chevron) toggles collapse; right-click offers
 			// Rename / Delete.
@@ -382,6 +390,93 @@ func (w *Window) refreshSidebar() {
 		w.sidebar.Refresh()
 	}
 	w.refreshSidebarCount()
+}
+
+// handleRequestDrop completes a drag-to-reorder. srcReqIdx is the dragged
+// request's flat index; dropAbsY is the absolute pointer Y where the drag ended.
+// It maps dropAbsY to a visible sidebar row (and which half of it the pointer is
+// in) from the LIVE rendered geometry, asks Dev A's pure dropTarget where the
+// request should land, and calls moveRequest. Dropping a row onto itself (same
+// folder, same slot) is guarded as a no-op so it never needlessly marks dirty.
+//
+// Limitations (v1): the target must be within the visible list area — we don't
+// auto-scroll to off-screen rows. A drop below the last rendered row is treated
+// as "top-level, at the end" (visibleRow out of range → dropTarget returns that).
+// While a sidebar FILTER is active the displayed rows are a partial view of the
+// flat order, so anchoring a reorder against them would be ambiguous — drag
+// reorder is disabled (a no-op) until the filter is cleared.
+func (w *Window) handleRequestDrop(srcReqIdx int, dropAbsY float32) {
+	if w.filterQuery != "" {
+		return // reordering against a filtered (partial) view is disabled, see doc
+	}
+
+	visibleRow, below := w.rowAtAbsY(dropAbsY)
+	destFolderID, before := w.dropTarget(srcReqIdx, visibleRow, below)
+
+	// No-op guard: dropping a request before itself, with no folder change, would
+	// move nothing — skip it so the gesture doesn't dirty the collection.
+	if before == srcReqIdx && srcReqIdx >= 0 && srcReqIdx < len(w.coll.Requests) &&
+		w.coll.Requests[srcReqIdx].FolderID == destFolderID {
+		return
+	}
+
+	w.moveRequest(srcReqIdx, destFolderID, before)
+}
+
+// rowAtAbsY maps an absolute canvas Y to the sidebar's visible-row index (an
+// index into w.rows / sidebarRows) plus whether the pointer sits in that row's
+// LOWER half. It works from the list's PUBLIC geometry rather than walking
+// internal renderers: the list's absolute top (driver.AbsolutePositionForObject),
+// its scroll offset (List.GetScrollOffset), and the uniform padded row height
+// (the item template's MinSize plus theme padding — the sidebar gives every row
+// the same height, so widget.List stacks them at i*paddedHeight in content space).
+//
+//	contentY = (absY - listTop) + scrollOffset     // Y within the scrolled content
+//	row      = floor(contentY / paddedRowHeight)    // which stacked row that is
+//	below    = (contentY mod paddedRowHeight) > rowHeight/2
+//
+// Returns (noMoveTarget, false) when absY is above the first row or at/below the
+// end of the last row — i.e. no row contains it. dropTarget reads an out-of-range
+// visibleRow as "top-level, at the end", the intended behaviour for a drop in the
+// empty space past the last request.
+func (w *Window) rowAtAbsY(absY float32) (visibleRow int, below bool) {
+	if w.sidebar == nil || len(w.rows) == 0 {
+		return noMoveTarget, false
+	}
+
+	listTop := fyne.CurrentApp().Driver().AbsolutePositionForObject(w.sidebar).Y
+	contentY := (absY - listTop) + w.sidebar.GetScrollOffset()
+	if contentY < 0 {
+		return noMoveTarget, false // above the first row
+	}
+
+	rowHeight := w.sidebarRowHeight()
+	padding := theme.Padding()
+	paddedHeight := rowHeight + padding
+	if paddedHeight <= 0 {
+		return noMoveTarget, false
+	}
+
+	idx := int(contentY / paddedHeight)
+	if idx < 0 || idx >= len(w.rows) {
+		return noMoveTarget, false // below the last row
+	}
+
+	// Position WITHIN this row (0..paddedHeight). Falling in a row's trailing
+	// padding gap counts as the lower half of that row.
+	inRow := contentY - float32(idx)*paddedHeight
+	below = inRow > rowHeight/2
+	return idx, below
+}
+
+// sidebarRowHeight is the uniform height widget.List gives each sidebar row: the
+// item template's MinSize height. Built once and cached so the drop hit-test
+// doesn't reconstruct a widget per drag.
+func (w *Window) sidebarRowHeight() float32 {
+	if w.rowHeight == 0 {
+		w.rowHeight = newSidebarItem().MinSize().Height
+	}
+	return w.rowHeight
 }
 
 // folderRequestCount returns how many requests currently belong to folder id,
@@ -1234,7 +1329,27 @@ type verbRow struct {
 	// request at id, or nil to omit the item. Returning a *fyne.Menu lets it hang
 	// off the context menu as a true ChildMenu submenu.
 	moveMenu func(id int) *fyne.Menu
+
+	// --- Drag & drop (reorder a request, incl. across folders) ---
+	//
+	// onDragEnd is fired once on DragEnd with this row's request index and the LAST
+	// absolute pointer Y seen during the drag. The window (handleRequestDrop) maps
+	// that Y to a target row and performs the move. nil disables dragging.
+	onDragEnd func(srcReqIdx int, dropAbsY float32)
+	// dragging is true between the first Dragged and DragEnd; dragStartY/dragLastY
+	// record the gesture's first and most-recent absolute pointer Y so DragEnd can
+	// (a) hand the drop position to onDragEnd and (b) ignore a negligible move (a
+	// jittery click) so it never reorders. We DON'T reorder mid-drag — just track.
+	dragging   bool
+	dragStartY float32
+	dragLastY  float32
 }
+
+// dragDeadzone is the minimum absolute vertical pointer travel (in px) before a
+// drag counts as a real reorder gesture. Below it, DragEnd is treated as a stray
+// click-jitter and does nothing — so a plain tap (which never fires Dragged) and
+// a tiny accidental wobble both still just select/open the row.
+const dragDeadzone float32 = 5
 
 // newVerbRow builds an empty row; set() fills it per Request in UpdateItem.
 func newVerbRow() *verbRow {
@@ -1324,6 +1439,47 @@ func (r *verbRow) TappedSecondary(e *fyne.PointEvent) {
 	if c := fyne.CurrentApp().Driver().CanvasForObject(r); c != nil {
 		widget.ShowPopUpMenuAtPosition(menu, c, e.AbsolutePosition)
 	}
+}
+
+// Dragged tracks an in-progress drag of this request row. We do NOT reorder here;
+// we only record the absolute pointer Y so DragEnd knows where the gesture ended
+// (and the first Y so it can measure total travel). verbRow implementing
+// fyne.Draggable is what makes the glfw driver deliver these events at all — and
+// the driver only dispatches Dragged once the pointer actually MOVES while
+// pressed, so a plain tap never reaches here and keeps opening the row.
+func (r *verbRow) Dragged(e *fyne.DragEvent) {
+	if !r.dragging {
+		r.dragging = true
+		r.dragStartY = e.AbsolutePosition.Y
+	}
+	r.dragLastY = e.AbsolutePosition.Y
+}
+
+// DragEnd finishes a drag: if the gesture actually moved (beyond dragDeadzone, to
+// reject click-jitter) it hands the row's request index and the last pointer Y to
+// onDragEnd, which resolves the drop target and performs the move. Drag state is
+// always cleared so the next gesture starts fresh.
+func (r *verbRow) DragEnd() {
+	dragging := r.dragging
+	lastY := r.dragLastY
+	moved := absF32(r.dragLastY-r.dragStartY) >= dragDeadzone
+
+	// Reset before invoking the callback (refreshSidebar may rebind this row).
+	r.dragging = false
+	r.dragStartY = 0
+	r.dragLastY = 0
+
+	if dragging && moved && r.onDragEnd != nil {
+		r.onDragEnd(r.id, lastY)
+	}
+}
+
+// absF32 is a tiny float32 abs (math.Abs is float64-only).
+func absF32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // clearTabsDirty drops the unsaved marker from every open tab (called on save).
