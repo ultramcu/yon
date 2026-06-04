@@ -4,6 +4,21 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-06-04
+
+### Added
+- **Duplicate an Environment** ([#23]) — a *Duplicate* button in the Environment
+  manager clones the selected environment (its variables, including secrets, and
+  its SSH jump host) under a unique name, ready to edit.
+
+### Fixed
+- **Secret variables with the same name no longer collide across Environments**
+  ([#24]). A secret's value was stored in the shared `.env` keyed by the bare
+  variable name, so two Environments that each defined a same-named secret shared
+  one slot — the later save silently overwrote the earlier value. Secrets are now
+  namespaced per environment (existing `.env` files keep working and migrate on
+  the next save).
+
 ## [0.13.0] - 2026-06-04
 
 ### Added
@@ -255,6 +270,7 @@ All notable changes to Yon are documented here. The format follows
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[0.13.1]: https://github.com/ultramcu/yon/releases/tag/v0.13.1
 [0.13.0]: https://github.com/ultramcu/yon/releases/tag/v0.13.0
 [0.12.0]: https://github.com/ultramcu/yon/releases/tag/v0.12.0
 [0.11.2]: https://github.com/ultramcu/yon/releases/tag/v0.11.2
@@ -280,3 +296,5 @@ All notable changes to Yon are documented here. The format follows
 [0.1.0]: https://github.com/ultramcu/yon/releases/tag/v0.1.0
 [#21]: https://github.com/ultramcu/yon/issues/21
 [#22]: https://github.com/ultramcu/yon/issues/22
+[#23]: https://github.com/ultramcu/yon/issues/23
+[#24]: https://github.com/ultramcu/yon/issues/24
