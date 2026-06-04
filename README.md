@@ -12,10 +12,6 @@ A single native binary for macOS, Windows, and Linux — no account, no cloud,
 no telemetry. Your work stays in plain files on your own disk.
 </p>
 
-<p align="center">
-  <img src="assets/screenshot.png" alt="Yon screenshot" width="860">
-</p>
-
 ---
 
 ## Why Yon
@@ -30,34 +26,42 @@ The name is Thai: **โยน (yon)** = *to throw*. You throw a request; you cat
 ## Features
 
 - **Methods:** GET · POST · PUT · DELETE · PATCH · HEAD · OPTIONS — or type any custom verb
-- **Query parameters** and **headers** as toggleable key/value tables — the
-  Params table and the URL bar **stay in sync both ways**: paste a URL with a
-  `?query` and the pairs fill the table automatically (no "+ Add" needed), edit
-  the table and the URL updates, and unchecking a row drops it from the URL while
-  keeping it in the table
+- **Organize your requests:** group them into **folders** you can collapse to cut
+  clutter, **drag & drop** to reorder or move between folders, and **filter** the
+  sidebar by name / method / URL as you type. Right-click a request to **Duplicate**,
+  **Move to folder…**, or **Delete**; rename folders and the collection itself
+- **Request editor in tabs:** Params · Headers · Auth · Body. **Query parameters** and
+  **headers** are toggleable key/value tables — the Params table and the URL bar
+  **stay in sync both ways**: paste a URL with a `?query` and the pairs fill the table
+  automatically, edit the table and the URL updates, and unchecking a row drops it from
+  the URL while keeping it in the table
 - **Auth:** None · Basic · Bearer — set a default on the collection and inherit or
   override it per request
 - **Environments & variables:** `{{variables}}` in named environments (Local / Prod…)
   and collection-level variables, switched from a toolbar selector and substituted in
-  the URL, params, headers, body and auth. Secrets stay out of committed files (kept in
-  a gitignored `.env`); plus dynamic `{{$uuid}}` / `{{$timestamp}}`
+  the URL, params, headers, body and auth. Mark a variable **secret** to keep its value
+  out of committed files (stored in a gitignored `.env`); plus dynamic
+  `{{$uuid}}` / `{{$timestamp}}`
 - **Body:** None · JSON (auto `Content-Type` + pretty) · XML (auto `Content-Type` + format) · Text
-- **Response viewer:** status · time · size · headers, with a **Pretty** (indented and
-  syntax-coloured for JSON, XML and HTML) / **Raw** toggle and one-click **Copy**; huge bodies render
-  fast (virtualized) and are capped on screen with a *Save Output As…* escape hatch
+- **Response in tabs — Body & Headers:** the body uses the full pane, with a **Pretty**
+  (indented and syntax-coloured for JSON, XML and HTML) / **Raw** toggle and one-click
+  **Copy**; huge bodies render fast (virtualized) and are capped on screen with a
+  *Save Output As…* escape hatch. The footer shows status · time · size and the app version
 - **Find in response (⌘F / Ctrl+F):** search the body with match highlighting, a
   match counter, next/previous navigation, and Esc to close
 - **Pop-out window** (⤢): open a response in its own resizable window — drag-select
   and copy text, **Save Output As…** for the full body, or search with highlighting
-- **Copy as cURL:** turn any request into a ready-to-run `curl` command
+- **Copy as cURL:** turn any request into a ready-to-run `curl` command, with
+  `{{variables}}` resolved from the active environment
 - **Send / Cancel** any in-flight request — or press **Enter** in the URL bar to send
 - **Collections** saved as plain-JSON `.yon` files — one window per collection, one
-  tab per request; native OS open/save dialogs with **Save** / **Save As**, plus
-  **Open Recent**. Your open collections and tabs are restored on the next launch.
-  **Double-click a `.yon` file** in Finder/Explorer/your file manager to open it in
-  Yon once the file type is registered (see [`packaging/`](packaging/README.md))
+  tab per request; **⌘S / Ctrl+S** to Save and **⌘⇧S / Ctrl+Shift+S** for Save As,
+  plus native open dialogs and **Open Recent**. Your open collections and tabs are
+  restored on the next launch. **Double-click a `.yon` file** in Finder/Explorer/your
+  file manager to open it in Yon once the file type is registered (see
+  [`packaging/`](packaging/README.md))
 - **Import Collection (JSON):** bring in requests from a Collection v2.1 JSON export —
-  folders are flattened into request names and anything Yon can't represent is reported
+  anything Yon can't represent is reported
 - **Edit menu:** Copy · Paste · Find…
 - **Themes:** Dark Pro / Warm / System, switchable in Settings
 - **Connection settings:** request timeout, follow redirects, system proxy support,
