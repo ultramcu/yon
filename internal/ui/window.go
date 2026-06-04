@@ -3,9 +3,11 @@ package ui
 import (
 	"fmt"
 	"image/color"
+	"net"
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/store"
+	"github.com/ultramcu/yon/internal/tunnel"
 	"github.com/ultramcu/yon/internal/updater"
 )
 
@@ -71,6 +74,13 @@ type Window struct {
 	sbStatus  *canvas.Text
 	sbMeta    *canvas.Text
 	sbReqInfo *canvas.Text
+
+	// sbTunnel is the footer jump-host indicator: a coloured dot + env name shown
+	// only while the active environment resolves a complete jump host. It paints
+	// green when that host's Tunnel is Connected and grey/red otherwise. The text
+	// is hidden (empty) when there is no active jump host. updateTunnelIndicator
+	// drives it; the surrounding tappable opens the Tunnels window.
+	sbTunnel *canvas.Text
 
 	// sidebarCount is the "N requests" badge in the collection header; kept so
 	// add/delete can refresh the number without rebuilding the header.
@@ -1088,6 +1098,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("Rename Collection…", w.showRenameCollection),
 		fyne.NewMenuItem("Collection Auth…", w.showCollectionAuth),
 		fyne.NewMenuItem("Environments…", w.showEnvironmentManager),
+		fyne.NewMenuItem("Tunnels…", func() { w.app.openTunnelsWindow(w) }),
 	)
 	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
 	// system application menu (the one named after the app) — and "About" replaces
@@ -1515,8 +1526,15 @@ func (w *Window) buildStatusBar() fyne.CanvasObject {
 	w.sbMeta = mk("")
 	w.sbReqInfo = mk("")
 
-	// Left: version · status · time · size. Right: the request's method · path.
-	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta)
+	// Footer jump-host indicator: a clickable coloured dot + env name that opens
+	// the Tunnels window. canvas.Text isn't tappable, so wrap it in a tiny
+	// tappable container. It starts hidden; updateTunnelIndicator shows it only
+	// when the active environment has a complete jump host.
+	w.sbTunnel = mk("")
+	tunnelTap := newTappable(w.sbTunnel, func() { w.app.openTunnelsWindow(w) })
+
+	// Left: version · status · time · size · jump-host. Right: method · path.
+	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta, tunnelTap)
 	bar := container.NewBorder(nil, nil, left, w.sbReqInfo)
 
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameMenuBackground))
@@ -1568,6 +1586,100 @@ func (w *Window) updateStatusBar() {
 	w.sbStatus.Refresh()
 	w.sbMeta.Refresh()
 	w.sbReqInfo.Refresh()
+	w.updateTunnelIndicator()
+}
+
+// updateTunnelIndicator refreshes the footer jump-host dot. It shows a coloured
+// dot + the active environment's name when activeJumpHost reports a complete
+// jump host (green if that host's Tunnel is Connected, grey otherwise), and
+// hides the text when there is none. Safe to call before the bar is built.
+func (w *Window) updateTunnelIndicator() {
+	if w.sbTunnel == nil {
+		return
+	}
+	jh, ok := w.app.activeJumpHost(w)
+
+	// State for the dot colour: the matching Tunnel's state if one exists, else
+	// Disconnected.
+	state := tunnel.Disconnected
+	if ok && w.app.tunnels != nil {
+		want := jh.User + "@" + net.JoinHostPort(jh.Host, strconv.Itoa(jumpHostPort(jh.Port)))
+		for _, s := range w.app.tunnels.Status() {
+			if s.JumpHost == want {
+				state = s.State
+				break
+			}
+		}
+	}
+
+	envName := ""
+	if env, envOK := w.activeEnv(); envOK {
+		envName = env.Name
+	}
+	text, show := tunnelIndicatorText(envName, ok, state)
+	w.sbTunnel.Text = text
+	w.sbTunnel.Color = tunnelDotColor(state)
+	if show {
+		w.sbTunnel.Show()
+	} else {
+		w.sbTunnel.Hide()
+	}
+	w.sbTunnel.Refresh()
+}
+
+// tunnelIndicatorText builds the footer indicator string and whether to show it.
+// Fyne-free for the blind tester: a "<glyph> <env>" line gated on a complete
+// jump host (show == hasJumpHost). The glyph encodes the tunnel state so the
+// indicator is visibly distinct per state even without colour (the caller also
+// sets a matching dot colour). envName falls back to "tunnel" when blank so the
+// indicator is never an orphan glyph.
+func tunnelIndicatorText(envName string, hasJumpHost bool, state tunnel.State) (text string, show bool) {
+	if !hasJumpHost {
+		return "", false
+	}
+	name := envName
+	if name == "" {
+		name = "tunnel"
+	}
+	return tunnelStateGlyph(state) + " " + name, true
+}
+
+// tunnelStateGlyph maps a tunnel state to a single distinct status glyph for the
+// footer indicator: a filled dot when Connected, a half dot while Connecting, an
+// X on Error, and a hollow dot when Disconnected.
+func tunnelStateGlyph(state tunnel.State) string {
+	switch state {
+	case tunnel.Connected:
+		return "●"
+	case tunnel.Connecting:
+		return "◍"
+	case tunnel.Error:
+		return "✕"
+	default:
+		return "○"
+	}
+}
+
+// tunnelDotColor maps a tunnel state to the footer dot colour: success-green
+// when Connected, error-red on Error, muted grey otherwise.
+func tunnelDotColor(state tunnel.State) color.Color {
+	switch state {
+	case tunnel.Connected:
+		return theme.Color(theme.ColorNameSuccess)
+	case tunnel.Error:
+		return theme.Color(theme.ColorNameError)
+	default:
+		return theme.Color(theme.ColorNamePlaceHolder)
+	}
+}
+
+// jumpHostPort returns the jump host's port or the SSH default (22) when unset,
+// for matching a model.JumpHost against a Tunnel's "user@host:port" display.
+func jumpHostPort(p int) int {
+	if p == 0 {
+		return 22
+	}
+	return p
 }
 
 // urlPathOf returns the path component of a request URL for the status bar,

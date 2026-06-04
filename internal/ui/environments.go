@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strconv"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -112,11 +114,17 @@ func (w *Window) buildEnvSelector() fyne.CanvasObject {
 				w.coll.ActiveEnvironment = ""
 				w.markDirty()
 			}
+			// Clearing the active environment drops any jump-host binding.
+			w.app.rebindTunnel(w)
+			w.updateTunnelIndicator()
 		default:
 			if w.coll.ActiveEnvironment != choice {
 				w.coll.ActiveEnvironment = choice
 				w.markDirty()
 			}
+			// Follow the new active environment's jump host (if any).
+			w.app.rebindTunnel(w)
+			w.updateTunnelIndicator()
 		}
 	}
 	return sel
@@ -281,6 +289,186 @@ func (t *varTable) value() []model.Variable {
 	return out
 }
 
+// ---- SSH jump-host editor ----
+
+// jumpAuthKeyLabel and jumpAuthPasswordLabel are the auth-selector entries in
+// the jump-host form; they map to model.JumpAuthKey / model.JumpAuthPassword.
+const (
+	jumpAuthKeyLabel      = "Private key"
+	jumpAuthPasswordLabel = "Password"
+)
+
+// jumpHostFromForm builds the *model.JumpHost an environment should carry from
+// the jump-host form's raw fields. It returns nil when the jump host is turned
+// off (!use) or no Host is given, so an environment without a usable jump host
+// serializes exactly as before (nil JumpHost). Port is parsed from text; a
+// blank or non-numeric value yields 0, which the tunnel manager treats as the
+// default (22). auth selects password vs key auth: it accepts either the UI
+// selector label (jumpAuthPasswordLabel) or the model constant
+// (model.JumpAuthPassword); anything else maps to key auth. This is a pure
+// helper (no Fyne) so it can be unit-tested directly.
+func jumpHostFromForm(use bool, host, port, user, auth, keyPath, passphrase, password string, insecure bool) *model.JumpHost {
+	if !use || host == "" {
+		return nil
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil || p < 0 {
+		p = 0 // blank/invalid → 0, i.e. the manager's default port
+	}
+	authKind := model.JumpAuthKey
+	if auth == jumpAuthPasswordLabel || auth == model.JumpAuthPassword {
+		authKind = model.JumpAuthPassword
+	}
+	jh := &model.JumpHost{
+		Host:     host,
+		Port:     p,
+		User:     user,
+		Auth:     authKind,
+		Insecure: insecure,
+	}
+	// Carry only the fields the chosen auth uses; the unused secret/path stays
+	// blank so a password jump host never persists a stale key path and vice versa.
+	if authKind == model.JumpAuthPassword {
+		jh.Password = password
+	} else {
+		jh.KeyPath = keyPath
+		jh.Passphrase = passphrase
+	}
+	return jh
+}
+
+// jumpHostForm is the editable SSH jump-host section shown below the variable
+// table for a real environment. It edits a single environment's optional
+// *JumpHost; value() reads it back via jumpHostFromForm.
+type jumpHostForm struct {
+	container *fyne.Container
+
+	use        *widget.Check
+	host       *widget.Entry
+	port       *widget.Entry
+	user       *widget.Entry
+	auth       *widget.Select
+	keyPath    *widget.Entry
+	passphrase *widget.Entry
+	password   *widget.Entry
+	insecure   *widget.Check
+
+	// fields is the reveal target toggled by use; keyRow/passwordRow swap with the
+	// auth selector.
+	fields      *fyne.Container
+	keyRow      fyne.CanvasObject
+	passwordRow fyne.CanvasObject
+}
+
+// newJumpHostForm builds the jump-host form seeded from jh (nil means "no jump
+// host": the Use checkbox is off and the fields are hidden).
+func newJumpHostForm(jh *model.JumpHost) *jumpHostForm {
+	f := &jumpHostForm{}
+
+	f.host = widget.NewEntry()
+	f.host.SetPlaceHolder("bastion.example.com")
+	f.port = widget.NewEntry()
+	f.port.SetPlaceHolder("22")
+	f.user = widget.NewEntry()
+	f.user.SetPlaceHolder("user")
+	f.auth = widget.NewSelect([]string{jumpAuthKeyLabel, jumpAuthPasswordLabel}, nil)
+	f.keyPath = widget.NewEntry()
+	f.keyPath.SetPlaceHolder("~/.ssh/id_ed25519")
+	f.passphrase = widget.NewPasswordEntry()
+	f.passphrase.SetPlaceHolder("Key passphrase (optional)")
+	f.password = widget.NewPasswordEntry()
+	f.password.SetPlaceHolder("Password")
+	f.insecure = widget.NewCheck("Skip host key check (insecure)", nil)
+
+	// Seed from the existing config.
+	f.auth.SetSelected(jumpAuthKeyLabel)
+	if jh != nil {
+		f.host.SetText(jh.Host)
+		if jh.Port != 0 {
+			f.port.SetText(strconv.Itoa(jh.Port))
+		}
+		f.user.SetText(jh.User)
+		if jh.Auth == model.JumpAuthPassword {
+			f.auth.SetSelected(jumpAuthPasswordLabel)
+		}
+		f.keyPath.SetText(jh.KeyPath)
+		f.passphrase.SetText(jh.Passphrase)
+		f.password.SetText(jh.Password)
+		f.insecure.SetChecked(jh.Insecure)
+	}
+
+	f.keyRow = container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("Key path", f.keyPath),
+			widget.NewFormItem("Passphrase", f.passphrase),
+		),
+	)
+	f.passwordRow = widget.NewForm(widget.NewFormItem("Password", f.password))
+
+	authFields := container.NewStack(f.keyRow, f.passwordRow)
+	f.auth.OnChanged = func(string) { f.refreshAuth(authFields) }
+
+	f.fields = container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("Host", f.host),
+			widget.NewFormItem("Port", f.port),
+			widget.NewFormItem("User", f.user),
+			widget.NewFormItem("Auth", f.auth),
+		),
+		authFields,
+		f.insecure,
+	)
+
+	f.use = widget.NewCheck("Use SSH jump host", func(bool) { f.refreshVisibility() })
+	f.use.SetChecked(jh != nil)
+
+	f.container = container.NewVBox(
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("SSH jump host", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		f.use,
+		f.fields,
+	)
+
+	f.refreshVisibility()
+	f.refreshAuth(authFields)
+	return f
+}
+
+// refreshVisibility shows the jump-host fields only when "Use SSH jump host" is
+// checked.
+func (f *jumpHostForm) refreshVisibility() {
+	if f.use.Checked {
+		f.fields.Show()
+	} else {
+		f.fields.Hide()
+	}
+}
+
+// refreshAuth reveals the key rows or the password row to match the auth
+// selector.
+func (f *jumpHostForm) refreshAuth(authFields *fyne.Container) {
+	if f.auth.Selected == jumpAuthPasswordLabel {
+		f.keyRow.Hide()
+		f.passwordRow.Show()
+	} else {
+		f.keyRow.Show()
+		f.passwordRow.Hide()
+	}
+	authFields.Refresh()
+}
+
+// value reads the form back into a *model.JumpHost (nil when unchecked or Host
+// is empty) via the pure jumpHostFromForm.
+func (f *jumpHostForm) value() *model.JumpHost {
+	return jumpHostFromForm(
+		f.use.Checked,
+		f.host.Text, f.port.Text, f.user.Text,
+		f.auth.Selected,
+		f.keyPath.Text, f.passphrase.Text, f.password.Text,
+		f.insecure.Checked,
+	)
+}
+
 // ---- Manage Environments dialog ----
 
 // showEnvironmentManager opens the environment manager: a left list of
@@ -323,7 +511,8 @@ func (w *Window) showEnvironmentManager() {
 
 	var selected int               // index into entries()
 	var table *varTable            // editor for the currently selected entry
-	detail := container.NewStack() // holds the table
+	var jhForm *jumpHostForm       // SSH jump-host editor (real environments only)
+	detail := container.NewStack() // holds the table (+ jump-host form)
 	var list *widget.List
 	var rebuildDetail func()
 	var commitTable func() // flush the visible table back into working/collVars
@@ -342,6 +531,10 @@ func (w *Window) showEnvironmentManager() {
 		envIdx := editing - 1
 		if envIdx >= 0 && envIdx < len(working) {
 			working[envIdx].Variables = table.value()
+			// Real environments also carry the optional SSH jump host.
+			if jhForm != nil {
+				working[envIdx].JumpHost = jhForm.value()
+			}
 		}
 	}
 
@@ -349,16 +542,27 @@ func (w *Window) showEnvironmentManager() {
 		commitTable()
 		editing = selected
 		var vars []model.Variable
-		// The collection pseudo-entry (selected == 0) does not support secrets;
-		// real environments do.
+		var jh *model.JumpHost
+		// The collection pseudo-entry (selected == 0) does not support secrets or
+		// a jump host; real environments do.
 		secrets := selected != 0
 		if selected == 0 {
 			vars = collVars
 		} else if envIdx := selected - 1; envIdx >= 0 && envIdx < len(working) {
 			vars = working[envIdx].Variables
+			jh = working[envIdx].JumpHost
 		}
 		table = newVarTable(vars, secrets)
-		detail.Objects = []fyne.CanvasObject{table.container}
+		if secrets {
+			// Real environment: show the variable table with the SSH jump-host
+			// editor below it.
+			jhForm = newJumpHostForm(jh)
+			content := container.NewBorder(nil, jhForm.container, nil, nil, table.container)
+			detail.Objects = []fyne.CanvasObject{content}
+		} else {
+			jhForm = nil
+			detail.Objects = []fyne.CanvasObject{table.container}
+		}
 		detail.Refresh()
 	}
 
@@ -464,6 +668,7 @@ func (w *Window) showEnvironmentManager() {
 				}
 				selected = 0
 				table = nil
+				jhForm = nil
 				editing = 0
 				list.Refresh()
 				list.Select(0)

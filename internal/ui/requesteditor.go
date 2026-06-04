@@ -394,6 +394,12 @@ func (rt *requestTab) startSend() {
 	// Expand {{variable}} templates (URL, params, headers, body, auth) using the
 	// window's active environment + collection variables.
 	opts.Resolve = rt.win.varScope().Resolve
+	// When the active environment defines a complete SSH jump host, dial every
+	// Request THROUGH it; otherwise opts.DialContext stays nil and the send uses
+	// the default transport unchanged.
+	if jh, ok := rt.win.app.activeJumpHost(rt.win); ok {
+		opts.DialContext = rt.win.app.tunnels.DialContext(jh)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.sendSeq++

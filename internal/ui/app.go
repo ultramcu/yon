@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"os"
 
+	"sync"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 
 	"github.com/ultramcu/yon/internal/model"
 	"github.com/ultramcu/yon/internal/store"
+	"github.com/ultramcu/yon/internal/tunnel"
 )
 
 // AppID is the Fyne application identifier; it scopes Preferences storage
@@ -30,6 +33,17 @@ type App struct {
 	// windows holds every open Collection window keyed by its *Window so we can
 	// enumerate them for session save and remove them on close.
 	windows map[*Window]struct{}
+
+	// tunnels is the app-wide SSH jump-host manager (Phase 1 core). One Tunnel
+	// per distinct jump-host identity, shared and refcounted across windows.
+	tunnels *tunnel.Manager
+
+	// tunnelMu guards tunnelRelease, which is read/written from the UI goroutine
+	// on env switches and window close. The map keeps each window's current
+	// jump-host refcount handle: rebindTunnel/forgetWindow call its release func
+	// to drop the previous binding.
+	tunnelMu      sync.Mutex
+	tunnelRelease map[*Window]func()
 }
 
 // New constructs the UI controller around an already-created fyne.App (created
@@ -38,10 +52,14 @@ type App struct {
 func New(a fyne.App) *App {
 	a.SetIcon(appIcon)
 	app := &App{
-		fyneApp:  a,
-		settings: loadSettings(a.Preferences()),
-		windows:  make(map[*Window]struct{}),
+		fyneApp:       a,
+		settings:      loadSettings(a.Preferences()),
+		windows:       make(map[*Window]struct{}),
+		tunnelRelease: make(map[*Window]func()),
 	}
+	// The jump-host manager wires the UI's TOFU prompt for unknown host keys;
+	// without it the manager rejects first-time hosts (the headless default).
+	app.tunnels = tunnel.New(tunnel.WithTOFU(app.tunnelTOFUPrompt))
 	app.applyTheme() // apply the saved appearance theme before any window is built
 	return app
 }
@@ -61,6 +79,7 @@ func (a *App) applyTheme() {
 func (a *App) Run(files ...string) {
 	a.fyneApp.Lifecycle().SetOnStopped(func() {
 		a.saveSession()
+		a.tunnels.Close() // tear down every live Tunnel on quit
 	})
 
 	// macOS delivers Finder double-clicks as an "open document" Apple Event
@@ -171,6 +190,15 @@ func (a *App) OpenCollectionWindow(coll model.Collection, path string) *Window {
 // in the next session save.
 func (a *App) forgetWindow(w *Window) {
 	delete(a.windows, w)
+
+	// Drop the window's jump-host refcount so closing it tears down a Tunnel that
+	// no other window still holds.
+	a.tunnelMu.Lock()
+	if release := a.tunnelRelease[w]; release != nil {
+		release()
+		delete(a.tunnelRelease, w)
+	}
+	a.tunnelMu.Unlock()
 }
 
 // prefs is a small accessor used across the ui package.
