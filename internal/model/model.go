@@ -9,6 +9,8 @@
 package model
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"strings"
@@ -95,15 +97,43 @@ type Body struct {
 	Content string   `json:"content,omitempty"`
 }
 
+// Folder is a one-level-deep grouping of Requests within a Collection. Folders
+// do NOT nest (no folder ever lives inside another) and they do NOT own their
+// requests: a Request points at its folder via Request.FolderID, while
+// Collection.Requests stays a single flat, ordered slice. A Folder is therefore
+// a display/grouping layer over the flat requests, identified by a stable ID.
+type Folder struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Collapsed bool   `json:"collapsed,omitempty"`
+}
+
+// NewFolderID returns a short, collision-resistant folder id: the literal "f"
+// followed by 8 hex characters (4 crypto-random bytes). Mirrors the uuid helper
+// style in internal/variables. On the (vanishingly unlikely) rand failure it
+// still returns a well-formed, if non-random, id.
+func NewFolderID() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "f00000000"
+	}
+	return "f" + hex.EncodeToString(b[:])
+}
+
 // Request is a single HTTP request definition the user composes and sends.
+//
+// FolderID is the id of the Folder this Request belongs to, or "" for a
+// top-level (ungrouped) request. It is grouping metadata only: it never changes
+// the Request's position in the flat Collection.Requests slice.
 type Request struct {
-	Name    string  `json:"name,omitempty"`
-	Method  Method  `json:"method"`
-	URL     string  `json:"url"`
-	Params  []Param `json:"params,omitempty"`  // query parameters
-	Headers []Param `json:"headers,omitempty"` // request headers
-	Auth    Auth    `json:"auth"`
-	Body    Body    `json:"body"`
+	Name     string  `json:"name,omitempty"`
+	Method   Method  `json:"method"`
+	URL      string  `json:"url"`
+	Params   []Param `json:"params,omitempty"`  // query parameters
+	Headers  []Param `json:"headers,omitempty"` // request headers
+	Auth     Auth    `json:"auth"`
+	Body     Body    `json:"body"`
+	FolderID string  `json:"folderId,omitempty"` // owning Folder id, or "" for top-level
 }
 
 // Collection is a flat, ordered list of Requests persisted as one .yon file.
@@ -120,6 +150,7 @@ type Collection struct {
 	Auth              Auth       `json:"auth"`
 	Variables         []Variable `json:"variables,omitempty"`
 	ActiveEnvironment string     `json:"activeEnvironment,omitempty"`
+	Folders           []Folder   `json:"folders,omitempty"`
 	Requests          []Request  `json:"requests,omitempty"`
 }
 

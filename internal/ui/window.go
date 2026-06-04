@@ -39,6 +39,16 @@ type Window struct {
 	sidebar *widget.List
 	tabs    *tabStrip
 
+	// rows is the cached grouped display order (folder headers + request rows)
+	// the sidebar List renders. It is recomputed by refreshSidebar() on every
+	// change so the List's length() and updateItem() callbacks agree within a
+	// single refresh: length() returns len(rows) and updateItem() reads rows[i]
+	// to decide whether to render a folder header or a request. A list item index
+	// (the VISIBLE row position) is therefore distinct from a request's flat
+	// Collection.Requests index (carried in sidebarRow.ReqIdx) and from
+	// selectedID, which always stays a flat request index.
+	rows []sidebarRow
+
 	// Bottom status bar (mockup-v9): the active tab's last response status/time/
 	// size on the left, its method · path on the right.
 	sbStatus  *canvas.Text
@@ -54,9 +64,13 @@ type Window struct {
 	// without rebuilding the header.
 	sidebarTitle *widget.Label
 
-	// selectedID is the currently-selected sidebar row (-1 = none); a row paints
-	// its cyan left-accent bar when its id matches, on top of the List's own
-	// selection tint.
+	// selectedID is the currently-selected request's FLAT Collection.Requests
+	// index (-1 = none) — NOT the visible list-row position. A request row paints
+	// its cyan left-accent bar when its ReqIdx matches selectedID, on top of the
+	// List's own (visible-row) selection tint. Keeping selectedID a flat index
+	// means folder collapse/expand (which changes which rows are visible, and
+	// hence visible-row positions) never invalidates the selection, and it stays
+	// aligned with openTabs, which is also keyed by flat index.
 	selectedID widget.ListItemID
 
 	// openTabs maps a Collection request index to its open editor Tab, so we
@@ -158,11 +172,16 @@ func (w *Window) buildSidebarHeader() fyne.CanvasObject {
 	add := widget.NewButtonWithIcon("", theme.ContentAddIcon(), w.addRequest)
 	add.Importance = widget.LowImportance
 
+	// "New Folder" affordance next to the request "Add" button, opening a name
+	// dialog and creating an empty, expanded folder.
+	newFolder := widget.NewButtonWithIcon("", theme.FolderNewIcon(), w.showNewFolder)
+	newFolder.Importance = widget.LowImportance
+
 	folder := widget.NewIcon(theme.FolderIcon())
 	header := container.NewBorder(
 		nil, nil,
 		container.NewHBox(folder, title),
-		container.NewHBox(w.sidebarCount, add),
+		container.NewHBox(w.sidebarCount, newFolder, add),
 		nil,
 	)
 
@@ -191,43 +210,135 @@ func (w *Window) refreshSidebarCount() {
 	w.sidebarCount.SetText(fmt.Sprintf("%d", len(w.coll.Requests)))
 }
 
-// buildSidebar creates the request list. Each row is a coloured UPPERCASE verb
-// tag (per methodColor) plus the Request's DisplayName, with a thin cyan accent
-// bar marking the selected row. Selecting a row opens that Request as a Tab
-// (single-click open). The List stays virtualized: the row is built once in
-// CreateItem and recoloured/relabelled per id in UpdateItem.
+// buildSidebar creates the grouped request list. It renders the order produced
+// by sidebarRows() (cached in w.rows): folder header rows interleaved with their
+// request rows, then top-level requests last. A single List template must serve
+// BOTH row kinds, so each list item is a sidebarItem — a container holding a
+// folderRow AND a verbRow, exactly one shown per row (see sidebarItem.set). The
+// List stays virtualized: a sidebarItem is built once in CreateItem and morphed
+// per visible-row id in UpdateItem.
+//
+// IMPORTANT (visible-row vs flat index): the List's own length and selection are
+// in VISIBLE-row units (positions in w.rows). selectedID, openTabs and every
+// request operation are in FLAT Collection.Requests units. UpdateItem and
+// OnSelected translate between them via w.rows[visibleID].
 func (w *Window) buildSidebar() {
+	w.rows = w.sidebarRows()
 	w.sidebar = widget.NewList(
-		func() int { return len(w.coll.Requests) },
+		func() int { return len(w.rows) },
 		func() fyne.CanvasObject {
-			row := newVerbRow()
-			// Right-clicking a row offers Duplicate (inserts an independent copy
-			// after the row) then Delete; confirmDeleteRequest prompts before it
-			// removes the Request from the Collection.
-			row.onDuplicate = w.duplicateRequest
-			row.onDelete = w.confirmDeleteRequest
-			// Left-clicking a row opens it. Route through sidebar.Select (not
-			// openRequestTab) so OnSelected runs the full programmatic path:
-			// selectedID update + accent repaint + openRequestTab.
-			row.onTap = func(id int) { w.sidebar.Select(id) }
-			return row
+			it := newSidebarItem()
+			// Request-row callbacks (only fired while the item shows its verbRow).
+			// Right-click offers Duplicate, Delete, and "Move to folder…"; left-
+			// click routes through selectByReqIdx so the full select/open path runs.
+			it.req.onDuplicate = w.duplicateRequest
+			it.req.onDelete = w.confirmDeleteRequest
+			it.req.moveMenu = w.moveToFolderMenu
+			it.req.onTap = func(reqIdx int) { w.selectByReqIdx(reqIdx) }
+			// Folder-row callbacks (only fired while the item shows its folderRow).
+			// A primary tap (header or chevron) toggles collapse; right-click offers
+			// Rename / Delete.
+			it.folder.onToggle = w.toggleFolder
+			it.folder.onRename = w.showRenameFolder
+			it.folder.onDelete = w.confirmDeleteFolder
+			return it
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
-			if id < 0 || id >= len(w.coll.Requests) {
+			if id < 0 || id >= len(w.rows) {
 				return
 			}
-			o.(*verbRow).set(id, w.coll.Requests[id], id == w.selectedID)
+			row := w.rows[id]
+			it := o.(*sidebarItem)
+			if row.IsFolder {
+				f, ok := w.folderByID(row.FolderID)
+				if !ok {
+					return
+				}
+				it.setFolder(*f, w.folderRequestCount(row.FolderID))
+				return
+			}
+			if row.ReqIdx < 0 || row.ReqIdx >= len(w.coll.Requests) {
+				return
+			}
+			// A request row shows the accent when its FLAT index matches selectedID
+			// (not when the visible-row id matches — those are different spaces).
+			it.setRequest(row.ReqIdx, w.coll.Requests[row.ReqIdx], row.ReqIdx == w.selectedID)
 		},
 	)
+	// The List's selection is by visible row. Translate it to the row's flat
+	// request index: a folder header carries no request, so selecting one just
+	// clears the List selection (its own tap already toggled collapse). A request
+	// row drives the existing select/open path keyed by its flat ReqIdx.
 	w.sidebar.OnSelected = func(id widget.ListItemID) {
-		w.selectedID = id
+		if id < 0 || id >= len(w.rows) {
+			return
+		}
+		row := w.rows[id]
+		if row.IsFolder {
+			w.sidebar.Unselect(id)
+			return
+		}
+		w.selectedID = row.ReqIdx
 		w.sidebar.Refresh() // repaint accent bars
-		w.openRequestTab(id)
+		w.openRequestTab(row.ReqIdx)
 	}
 	w.sidebar.OnUnselected = func(widget.ListItemID) {
 		w.selectedID = -1
 		w.sidebar.Refresh()
 	}
+}
+
+// selectByReqIdx selects the visible row whose flat request index is reqIdx,
+// routing through widget.List.Select so OnSelected runs the full programmatic
+// path (selectedID update + accent repaint + openRequestTab). Request rows carry
+// a flat index but the List selects by VISIBLE position, so we map reqIdx →
+// visible-row id through the cached w.rows. No-op if the request isn't currently
+// visible (e.g. its folder is collapsed).
+func (w *Window) selectByReqIdx(reqIdx int) {
+	for i, r := range w.rows {
+		if !r.IsFolder && r.ReqIdx == reqIdx {
+			w.sidebar.Select(i)
+			return
+		}
+	}
+}
+
+// unselectReqIdx clears the List's (visible-row) selection for the request whose
+// flat index is reqIdx, mapping reqIdx → visible-row id through w.rows. Used when
+// a request's tab closes or it is deleted, so its row can be clicked to reopen
+// (widget.List.Select no-ops on an already-selected row). No-op if the request
+// isn't currently visible.
+func (w *Window) unselectReqIdx(reqIdx int) {
+	for i, r := range w.rows {
+		if !r.IsFolder && r.ReqIdx == reqIdx {
+			w.sidebar.Unselect(i)
+			return
+		}
+	}
+}
+
+// refreshSidebar recomputes the cached grouped rows and refreshes the list +
+// count badge. Call it after ANY change that affects the sidebar (add/rename/
+// delete folder, move request, collapse, add/delete/duplicate request) so the
+// List's length() and updateItem() read a consistent row set.
+func (w *Window) refreshSidebar() {
+	w.rows = w.sidebarRows()
+	if w.sidebar != nil {
+		w.sidebar.Refresh()
+	}
+	w.refreshSidebarCount()
+}
+
+// folderRequestCount returns how many requests currently belong to folder id,
+// shown in the folder header badge.
+func (w *Window) folderRequestCount(id string) int {
+	n := 0
+	for i := range w.coll.Requests {
+		if w.coll.Requests[i].FolderID == id {
+			n++
+		}
+	}
+	return n
 }
 
 // buildTabs creates the custom browser-card tab strip holding open Request
@@ -273,7 +384,7 @@ func (w *Window) closeTab(card *tabCard) {
 	// selected row, which would otherwise leave the request un-reopenable.
 	if closedIdx >= 0 && closedIdx == w.selectedID {
 		w.selectedID = -1
-		w.sidebar.Unselect(closedIdx)
+		w.unselectReqIdx(closedIdx) // closedIdx is a flat index; map to its visible row
 	}
 	w.updateStatusBar()
 }
@@ -287,11 +398,13 @@ func (w *Window) addRequest() {
 	}
 	w.coll.Requests = append(w.coll.Requests, req)
 	w.markDirty()
-	w.sidebar.Refresh()
-	w.refreshSidebarCount()
+	// A new request is top-level (FolderID ""); recompute the grouped rows so its
+	// row exists before we select it.
+	w.refreshSidebar()
 	// Select via the sidebar (not openRequestTab directly) so the new row's
-	// selection + cyan accent stay in sync with the opened tab.
-	w.sidebar.Select(len(w.coll.Requests) - 1)
+	// selection + cyan accent stay in sync with the opened tab. selectByReqIdx maps
+	// the flat index to the visible row.
+	w.selectByReqIdx(len(w.coll.Requests) - 1)
 }
 
 // confirmDeleteRequest asks the user to confirm removing the Request at idx, and
@@ -352,14 +465,15 @@ func (w *Window) deleteRequest(idx int) {
 	switch {
 	case w.selectedID == idx:
 		w.selectedID = -1
-		w.sidebar.Unselect(idx)
+		// idx is a flat index; w.rows still holds the pre-delete cache here, so map
+		// the deleted request's flat index to its (about-to-be-removed) visible row.
+		w.unselectReqIdx(idx)
 	case w.selectedID > idx:
 		w.selectedID--
 	}
 
 	w.markDirty()
-	w.sidebar.Refresh()
-	w.refreshSidebarCount()
+	w.refreshSidebar()
 	w.updateStatusBar()
 }
 
@@ -420,12 +534,13 @@ func (w *Window) duplicateRequest(idx int) {
 	}
 
 	w.markDirty()
-	w.sidebar.Refresh()
-	w.refreshSidebarCount()
+	w.refreshSidebar()
 	w.updateStatusBar()
 
 	// Select via the sidebar so the new copy's selection + accent + tab all sync.
-	w.sidebar.Select(idx + 1)
+	// The copy is at flat index idx+1; selectByReqIdx maps that to its visible row
+	// (the copy inherits the original's FolderID, so it sits under the same folder).
+	w.selectByReqIdx(idx + 1)
 }
 
 // commitRequest writes an edited Request back into the Collection at idx and
@@ -434,12 +549,156 @@ func (w *Window) commitRequest(idx int, req model.Request) {
 	if idx < 0 || idx >= len(w.coll.Requests) {
 		return
 	}
+	// FolderID is grouping metadata the editor does not own (current() never sets
+	// it), so preserve the request's existing folder across an edit — otherwise
+	// editing a grouped request would silently move it back to top-level.
+	req.FolderID = w.coll.Requests[idx].FolderID
 	w.coll.Requests[idx] = req
 	w.markDirty()
 	w.sidebar.Refresh()
 	if rt, ok := w.openTabs[idx]; ok {
 		rt.tab.setRequest(req.Method, req.DisplayName(), rt.dirty)
 	}
+}
+
+// --- Folder operations -------------------------------------------------------
+//
+// Folders are a one-level grouping layer over the flat Collection.Requests
+// slice (see model.Folder): each Request carries a FolderID, but its index in
+// Requests never changes, so all index-keyed state (openTabs, selectedID,
+// deleteRequest, duplicateRequest, session) is untouched by these operations.
+// These methods mutate the model + mark dirty only; rendering is Dev B's job.
+
+// sidebarRow is one row of the grouped sidebar display order. A row is either a
+// folder header (IsFolder true, FolderID set, ReqIdx == -1) or a request row
+// (IsFolder false, ReqIdx is the flat Collection.Requests index, FolderID is the
+// request's owning folder or "" for top-level).
+type sidebarRow struct {
+	FolderID string
+	ReqIdx   int
+	IsFolder bool
+}
+
+// addFolder appends a new Folder with the given (trimmed) name and a fresh
+// unique id to the Collection, marks the window dirty, and returns the new id.
+// It does not touch the UI.
+func (w *Window) addFolder(name string) string {
+	id := w.newFolderID()
+	w.coll.Folders = append(w.coll.Folders, model.Folder{ID: id, Name: strings.TrimSpace(name)})
+	w.markDirty()
+	return id
+}
+
+// newFolderID returns a folder id unique within the current Collection, retrying
+// on the (astronomically rare) collision so rapid creation can't produce dupes.
+func (w *Window) newFolderID() string {
+	for {
+		id := model.NewFolderID()
+		if _, ok := w.folderByID(id); !ok {
+			return id
+		}
+	}
+}
+
+// renameFolder sets the named folder's Name (trimmed) and marks dirty. No-op if
+// the id is unknown.
+func (w *Window) renameFolder(id, name string) {
+	if f, ok := w.folderByID(id); ok {
+		f.Name = strings.TrimSpace(name)
+		w.markDirty()
+	}
+}
+
+// deleteFolder removes the folder from the Collection and reparents every
+// request that was in it to top-level (FolderID = ""). Requests are KEPT — their
+// flat indices are unchanged — so deleting a folder never loses requests. No-op
+// if the id is unknown.
+func (w *Window) deleteFolder(id string) {
+	idx := w.folderIndex(id)
+	if idx < 0 {
+		return
+	}
+	w.coll.Folders = append(w.coll.Folders[:idx], w.coll.Folders[idx+1:]...)
+	for i := range w.coll.Requests {
+		if w.coll.Requests[i].FolderID == id {
+			w.coll.Requests[i].FolderID = ""
+		}
+	}
+	w.markDirty()
+}
+
+// moveRequestToFolder sets the FolderID of the Request at reqIdx (folderID "" =
+// top-level). It guards reqIdx range and that folderID exists (or is ""), and
+// does NOT reorder Requests, so flat indices / openTabs stay valid. No-op if
+// reqIdx is out of range or folderID names no existing folder.
+func (w *Window) moveRequestToFolder(reqIdx int, folderID string) {
+	if reqIdx < 0 || reqIdx >= len(w.coll.Requests) {
+		return
+	}
+	if folderID != "" {
+		if _, ok := w.folderByID(folderID); !ok {
+			return
+		}
+	}
+	w.coll.Requests[reqIdx].FolderID = folderID
+	w.markDirty()
+}
+
+// toggleFolderCollapsed flips the named folder's Collapsed flag and marks dirty.
+// No-op if the id is unknown.
+func (w *Window) toggleFolderCollapsed(id string) {
+	if f, ok := w.folderByID(id); ok {
+		f.Collapsed = !f.Collapsed
+		w.markDirty()
+	}
+}
+
+// folderByID returns a pointer to the Folder with the given id (so callers can
+// mutate it in place) and whether it was found.
+func (w *Window) folderByID(id string) (*model.Folder, bool) {
+	idx := w.folderIndex(id)
+	if idx < 0 {
+		return nil, false
+	}
+	return &w.coll.Folders[idx], true
+}
+
+// folderIndex returns the index of the folder with id in w.coll.Folders, or -1.
+func (w *Window) folderIndex(id string) int {
+	for i := range w.coll.Folders {
+		if w.coll.Folders[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// sidebarRows computes the grouped display order for the sidebar. For each
+// folder in Collection.Folders order it emits a header row, then (unless the
+// folder is collapsed) that folder's requests in Requests-order; finally all
+// top-level requests (FolderID == "") in Requests-order. Each request row
+// carries its flat Collection.Requests index in ReqIdx, so Dev B can map a row
+// straight back to the request. A collapsed folder contributes only its header.
+func (w *Window) sidebarRows() []sidebarRow {
+	rows := make([]sidebarRow, 0, len(w.coll.Folders)+len(w.coll.Requests))
+	for fi := range w.coll.Folders {
+		f := w.coll.Folders[fi]
+		rows = append(rows, sidebarRow{FolderID: f.ID, ReqIdx: -1, IsFolder: true})
+		if f.Collapsed {
+			continue
+		}
+		for i := range w.coll.Requests {
+			if w.coll.Requests[i].FolderID == f.ID {
+				rows = append(rows, sidebarRow{FolderID: f.ID, ReqIdx: i})
+			}
+		}
+	}
+	for i := range w.coll.Requests {
+		if w.coll.Requests[i].FolderID == "" {
+			rows = append(rows, sidebarRow{ReqIdx: i})
+		}
+	}
+	return rows
 }
 
 // markDirty flags unsaved changes and updates the title bar.
@@ -866,6 +1125,10 @@ type verbRow struct {
 	onDelete    func(id int)
 	onDuplicate func(id int)
 	onTap       func(id int)
+	// moveMenu builds the "Move to folder…" submenu (folders + "Top level") for the
+	// request at id, or nil to omit the item. Returning a *fyne.Menu lets it hang
+	// off the context menu as a true ChildMenu submenu.
+	moveMenu func(id int) *fyne.Menu
 }
 
 // newVerbRow builds an empty row; set() fills it per Request in UpdateItem.
@@ -934,13 +1197,20 @@ func (r *verbRow) Tapped(*fyne.PointEvent) {
 // appear only when their callback is set; if none is, there's no menu to show.
 // Mirrors the tappable-widget pattern used by tabClose/segButton.
 func (r *verbRow) TappedSecondary(e *fyne.PointEvent) {
-	if r.onDuplicate == nil && r.onDelete == nil {
+	if r.onDuplicate == nil && r.onDelete == nil && r.moveMenu == nil {
 		return
 	}
 	id := r.id
 	var items []*fyne.MenuItem
 	if r.onDuplicate != nil {
 		items = append(items, fyne.NewMenuItem("Duplicate", func() { r.onDuplicate(id) }))
+	}
+	if r.moveMenu != nil {
+		// "Move to folder…" hangs a submenu of every folder + "Top level" off the
+		// context menu; each child calls moveRequestToFolder for this row's index.
+		mv := fyne.NewMenuItem("Move to folder…", nil)
+		mv.ChildMenu = r.moveMenu(id)
+		items = append(items, mv)
 	}
 	if r.onDelete != nil {
 		items = append(items, fyne.NewMenuItem("Delete", func() { r.onDelete(id) }))
