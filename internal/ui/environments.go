@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -469,6 +470,53 @@ func (f *jumpHostForm) value() *model.JumpHost {
 	)
 }
 
+// ---- Duplicate helpers (pure, Fyne-free, unit-testable) ----
+
+// duplicateEnvironment returns a deep, independent copy of src renamed to
+// newName. The copy shares no mutable state with src: Variables is reallocated
+// into a fresh slice (a Variable is all value-type fields, so copying the
+// elements is enough), and a non-nil JumpHost is cloned into a freshly
+// allocated *model.JumpHost that is a value-copy of *src.JumpHost (every
+// JumpHost field, including the secret Passphrase/Password, is a plain value).
+// Mutating the copy's Variables elements or JumpHost fields therefore never
+// touches src, and vice versa. A nil src.JumpHost yields a nil copy.
+func duplicateEnvironment(src model.Environment, newName string) model.Environment {
+	dup := model.Environment{
+		Name:      newName,
+		Variables: append([]model.Variable(nil), src.Variables...),
+	}
+	if src.JumpHost != nil {
+		jh := *src.JumpHost // value-copy of all JumpHost fields
+		dup.JumpHost = &jh
+	}
+	return dup
+}
+
+// uniqueEnvName returns a name derived from base that does not collide with any
+// existing name, matched case-insensitively. The first candidate is
+// `base + " copy"`; if that is taken it tries `base + " copy 2"`,
+// `base + " copy 3"`, … and returns the first free one. The rule is applied
+// verbatim regardless of base, so a base already ending in " copy" simply
+// yields "base copy copy" (then "base copy copy 2", …) — predictable over
+// clever. Matching is case-insensitive, so an existing "staging copy" still
+// pushes "Staging" to "Staging copy 2".
+func uniqueEnvName(base string, existing []string) string {
+	taken := make(map[string]bool, len(existing))
+	for _, name := range existing {
+		taken[strings.ToLower(name)] = true
+	}
+	candidate := base + " copy"
+	if !taken[strings.ToLower(candidate)] {
+		return candidate
+	}
+	for n := 2; ; n++ {
+		candidate = base + " copy " + strconv.Itoa(n)
+		if !taken[strings.ToLower(candidate)] {
+			return candidate
+		}
+	}
+}
+
 // ---- Manage Environments dialog ----
 
 // showEnvironmentManager opens the environment manager: a left list of
@@ -642,6 +690,35 @@ func (w *Window) showEnvironmentManager() {
 	})
 	renameBtn.Importance = widget.LowImportance
 
+	// Duplicate: deep-copy the selected environment under a fresh "<name> copy"
+	// name (unsaved until Save), mirroring Add's selection behaviour so the new
+	// environment opens in the editor. The Collection pseudo-entry has no jump
+	// host or secrets and is not a real environment, so it cannot be duplicated.
+	duplicateBtn := widget.NewButton("Duplicate", func() {
+		if selected == 0 {
+			dialog.ShowInformation("Duplicate", "Collection Variables cannot be duplicated.", w.win)
+			return
+		}
+		envIdx := selected - 1
+		if envIdx < 0 || envIdx >= len(working) {
+			return
+		}
+		// Flush the visible table/jump-host edits into the source first so the
+		// copy reflects the latest, uncommitted changes.
+		commitTable()
+		names := make([]string, 0, len(working))
+		for _, e := range working {
+			names = append(names, e.Name)
+		}
+		newName := uniqueEnvName(working[envIdx].Name, names)
+		dup := duplicateEnvironment(working[envIdx], newName)
+		working = append(working, dup)
+		selected = len(working) // new entry index in entries()
+		list.Refresh()
+		list.Select(selected)
+	})
+	duplicateBtn.Importance = widget.LowImportance
+
 	// Delete: removes the selected environment (deferred to Save). The Collection
 	// pseudo-entry cannot be deleted.
 	deleteBtn := widget.NewButton("Delete", func() {
@@ -676,7 +753,7 @@ func (w *Window) showEnvironmentManager() {
 	})
 	deleteBtn.Importance = widget.LowImportance
 
-	actions := container.NewHBox(addBtn, renameBtn, deleteBtn)
+	actions := container.NewHBox(addBtn, renameBtn, duplicateBtn, deleteBtn)
 	left := container.NewBorder(nil, actions, nil, nil, list)
 	body := container.NewHSplit(left, container.NewPadded(detail))
 	body.SetOffset(0.32)
