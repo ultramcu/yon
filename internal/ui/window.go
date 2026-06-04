@@ -62,6 +62,7 @@ type Window struct {
 
 	// Bottom status bar (mockup-v9): the active tab's last response status/time/
 	// size on the left, its method · path on the right.
+	sbVersion *canvas.Text
 	sbStatus  *canvas.Text
 	sbMeta    *canvas.Text
 	sbReqInfo *canvas.Text
@@ -1348,12 +1349,18 @@ func (w *Window) buildStatusBar() fyne.CanvasObject {
 		t.TextSize = theme.CaptionTextSize()
 		return t
 	}
+	// Static app version, far left: "v0.11.1" for a release, "dev" otherwise.
+	ver := "dev"
+	if v := currentVersion(); v != "" {
+		ver = "v" + v
+	}
+	w.sbVersion = mk(ver)
 	w.sbStatus = mk("Ready")
 	w.sbMeta = mk("")
 	w.sbReqInfo = mk("")
 
-	// Left: status · time · size. Right: the active request's method · path.
-	left := container.NewHBox(w.sbStatus, w.sbMeta)
+	// Left: version · status · time · size. Right: the request's method · path.
+	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta)
 	bar := container.NewBorder(nil, nil, left, w.sbReqInfo)
 
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameMenuBackground))
