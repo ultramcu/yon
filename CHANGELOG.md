@@ -4,6 +4,14 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-06-04
+
+### Fixed
+- **Secret variable names containing `=` or surrounding spaces now persist
+  correctly** ([#25]). Such names were mangled when written to `.env` (the value
+  loaded back empty); `.env` keys are now quoted/escaped when needed, while
+  ordinary names stay unquoted and existing files are unaffected.
+
 ## [0.13.1] - 2026-06-04
 
 ### Added
@@ -270,6 +278,7 @@ All notable changes to Yon are documented here. The format follows
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[0.13.2]: https://github.com/ultramcu/yon/releases/tag/v0.13.2
 [0.13.1]: https://github.com/ultramcu/yon/releases/tag/v0.13.1
 [0.13.0]: https://github.com/ultramcu/yon/releases/tag/v0.13.0
 [0.12.0]: https://github.com/ultramcu/yon/releases/tag/v0.12.0
@@ -298,3 +307,4 @@ All notable changes to Yon are documented here. The format follows
 [#22]: https://github.com/ultramcu/yon/issues/22
 [#23]: https://github.com/ultramcu/yon/issues/23
 [#24]: https://github.com/ultramcu/yon/issues/24
+[#25]: https://github.com/ultramcu/yon/issues/25
