@@ -11,16 +11,28 @@ import (
 // parseDotenv parses dotenv-format data into a key→value map.
 //
 // The format is one `KEY=value` assignment per line. Blank lines and lines whose
-// first non-space character is `#` are ignored. Surrounding whitespace is trimmed
-// from both the key and the value, and a single pair of matching surrounding
-// quotes (either '"' or '\”) is stripped from the value. For a double-quoted
-// value the escape sequences written by quoteDotenvValue are reversed in a
-// single left-to-right pass (`\n`→newline, `\"`→'"', `\\`→'\'), so a value
-// containing newlines, quotes or backslashes round-trips byte-identically.
-// Single-quoted and unquoted values are taken literally. A line without an `=`,
-// or with an empty key, is skipped rather than treated as an error so a slightly
-// malformed .env never blocks loading a collection. On duplicate keys the last
+// first non-space character is `#` are ignored. On duplicate keys the last
 // assignment wins.
+//
+// The key may be written either raw or double-quoted. A quoted key (the trimmed
+// line begins with '"') is read up to its first unescaped closing '"' and then
+// run through unescapeDotenvValue, the same way a double-quoted value is, so a
+// key containing the '=' delimiter, surrounding whitespace, quotes, '#' or
+// newlines round-trips byte-identically (see quoteDotenvKey). The first '='
+// after the closing quote separates key from value; a quoted key with no closing
+// quote, or no following '=', skips the line. A raw key takes the legacy path:
+// the line is split on its first '=' and the key is whitespace-trimmed — so
+// every pre-existing .env (whose keys are all unquoted and never start with '"')
+// parses exactly as before.
+//
+// The value is whitespace-trimmed and a single pair of matching surrounding
+// quotes (either '"' or '\”) is stripped. For a double-quoted value the escape
+// sequences written by quoteDotenvValue are reversed in a single left-to-right
+// pass (`\n`→newline, `\"`→'"', `\\`→'\'), so a value containing newlines,
+// quotes or backslashes round-trips byte-identically. Single-quoted and unquoted
+// values are taken literally. A line without an `=`, or with an empty raw key,
+// is skipped rather than treated as an error so a slightly malformed .env never
+// blocks loading a collection.
 func parseDotenv(data []byte) map[string]string {
 	out := make(map[string]string)
 	for _, raw := range strings.Split(string(data), "\n") {
@@ -28,15 +40,46 @@ func parseDotenv(data []byte) map[string]string {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
-			continue
+
+		var key, rest string
+		if strings.HasPrefix(line, `"`) {
+			// Quoted key: scan from index 1 to the first unescaped '"',
+			// respecting '\' escapes exactly like unescapeDotenvValue does.
+			end := -1
+			for i := 1; i < len(line); i++ {
+				if line[i] == '\\' {
+					i++ // skip the escaped character
+					continue
+				}
+				if line[i] == '"' {
+					end = i
+					break
+				}
+			}
+			if end < 0 {
+				continue // no closing quote: malformed, skip
+			}
+			key = unescapeDotenvValue(line[1:end])
+			// The next non-space char after the closing quote must be '='.
+			after := strings.TrimSpace(line[end+1:])
+			if !strings.HasPrefix(after, "=") {
+				continue // no '=' after the quoted key: malformed, skip
+			}
+			rest = after[1:]
+		} else {
+			// Legacy raw key: split on the first '=', trim the key.
+			eq := strings.IndexByte(line, '=')
+			if eq < 0 {
+				continue
+			}
+			key = strings.TrimSpace(line[:eq])
+			if key == "" {
+				continue
+			}
+			rest = line[eq+1:]
 		}
-		key := strings.TrimSpace(line[:eq])
-		if key == "" {
-			continue
-		}
-		val := strings.TrimSpace(line[eq+1:])
+
+		val := strings.TrimSpace(rest)
 		if len(val) >= 2 {
 			switch {
 			case val[0] == '"' && val[len(val)-1] == '"':
@@ -68,11 +111,11 @@ func readDotenv(path string) (map[string]string, error) {
 
 // writeDotenv writes the key→value pairs to the .env file at path in dotenv
 // format, one `KEY=value` per line, sorted by key for stable, git-friendly
-// output. The value is wrapped in double quotes only when it contains a
-// character that would otherwise change its parsed meaning (leading/trailing
-// space, quotes, '#', or newline); inner double quotes and backslashes are
-// escaped. If pairs is empty the file is removed so no stray empty .env lingers.
-// The write is atomic (temp file + rename).
+// output. Both sides are wrapped in double quotes only when they contain a
+// character that would otherwise change their parsed meaning: the key via
+// quoteDotenvKey (so ordinary keys stay raw and readable) and the value via
+// quoteDotenvValue. If pairs is empty the file is removed so no stray empty .env
+// lingers. The write is atomic (temp file + rename).
 func writeDotenv(path string, pairs map[string]string) error {
 	if len(pairs) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -89,13 +132,22 @@ func writeDotenv(path string, pairs map[string]string) error {
 
 	var b strings.Builder
 	for _, k := range keys {
-		b.WriteString(k)
+		b.WriteString(quoteDotenvKey(k))
 		b.WriteByte('=')
 		b.WriteString(quoteDotenvValue(pairs[k]))
 		b.WriteByte('\n')
 	}
 
 	return atomicWriteFile(path, []byte(b.String()))
+}
+
+// escapeDotenv applies the escaping used inside a double-quoted dotenv field
+// (key or value): `\`→`\\`, `"`→`\"`, newline→`\n`. unescapeDotenvValue reverses
+// it exactly. Both quoteDotenvValue and quoteDotenvKey use this so the two sides
+// can never drift apart.
+func escapeDotenv(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	return r.Replace(s)
 }
 
 // quoteDotenvValue returns v formatted for the right-hand side of a dotenv
@@ -107,8 +159,25 @@ func quoteDotenvValue(v string) string {
 	if !needQuote {
 		return v
 	}
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
-	return `"` + r.Replace(v) + `"`
+	return `"` + escapeDotenv(v) + `"`
+}
+
+// quoteDotenvKey returns k formatted for the left-hand side of a dotenv
+// assignment. Ordinary keys (e.g. `__var.x.token`) are returned raw so the file
+// stays readable; a key is double-quoted and escaped only when leaving it raw
+// would corrupt the round-trip — i.e. when it is empty, has leading/trailing
+// whitespace (which the legacy reader would trim), or contains the '=' delimiter,
+// the '"' quote char, a leading-'#' comment hazard or a newline. The escaping is
+// identical to quoteDotenvValue's (via escapeDotenv) and is reversed by
+// unescapeDotenvValue when parseDotenv reads a quoted key.
+func quoteDotenvKey(k string) string {
+	needQuote := k == "" ||
+		k != strings.TrimSpace(k) ||
+		strings.ContainsAny(k, "=\"#\n")
+	if !needQuote {
+		return k
+	}
+	return `"` + escapeDotenv(k) + `"`
 }
 
 // unescapeDotenvValue reverses quoteDotenvValue's escaping for the contents of a
