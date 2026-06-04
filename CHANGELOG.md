@@ -4,6 +4,17 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-06-04
+
+### Added
+- **New Request from cURL** ([#22]) — *File ▸ New Request from cURL…* opens a
+  paste box; Yon parses the `curl` command into a Request (the inverse of *Copy
+  as cURL*) and opens it. Supports method (`-X`), URL, headers (`-H`), body
+  (`-d` / `--data*` / `--data-urlencode`), `-G` query upload, Basic (`-u`) and
+  Bearer auth, and maps `Content-Type` to the body type; noise flags (`-L`,
+  `-k`, `--compressed`, …) are tolerated. Pure Go — no shell-out, no filesystem
+  access, no new dependencies.
+
 ## [0.12.0] - 2026-06-04
 
 ### Added
@@ -244,6 +255,7 @@ All notable changes to Yon are documented here. The format follows
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[0.13.0]: https://github.com/ultramcu/yon/releases/tag/v0.13.0
 [0.12.0]: https://github.com/ultramcu/yon/releases/tag/v0.12.0
 [0.11.2]: https://github.com/ultramcu/yon/releases/tag/v0.11.2
 [0.11.1]: https://github.com/ultramcu/yon/releases/tag/v0.11.1
@@ -267,3 +279,4 @@ All notable changes to Yon are documented here. The format follows
 [0.2.0]: https://github.com/ultramcu/yon/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ultramcu/yon/releases/tag/v0.1.0
 [#21]: https://github.com/ultramcu/yon/issues/21
+[#22]: https://github.com/ultramcu/yon/issues/22
