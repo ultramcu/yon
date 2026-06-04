@@ -556,15 +556,9 @@ func (w *Window) addRequest() {
 		Auth:   model.Auth{Kind: model.AuthInherit},
 		Body:   model.Body{Type: model.BodyNone},
 	}
-	w.coll.Requests = append(w.coll.Requests, req)
-	w.markDirty()
-	// A new request is top-level (FolderID ""); recompute the grouped rows so its
-	// row exists before we select it.
-	w.refreshSidebar()
-	// Select via the sidebar (not openRequestTab directly) so the new row's
-	// selection + cyan accent stay in sync with the opened tab. selectByReqIdx maps
-	// the flat index to the visible row.
-	w.selectByReqIdx(len(w.coll.Requests) - 1)
+	// append + mark dirty + refresh sidebar + open the new row. Shared with the
+	// New Request from cURL flow via appendAndOpenRequest (see fromcurl.go).
+	w.appendAndOpenRequest(req)
 }
 
 // confirmDeleteRequest asks the user to confirm removing the Request at idx, and
@@ -1077,6 +1071,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("New", func() { w.app.NewCollectionWindow() }),
 		fyne.NewMenuItem("Open…", w.open),
 		fyne.NewMenuItem("Import Collection (JSON)…", w.importCollection),
+		fyne.NewMenuItem("New Request from cURL…", w.newRequestFromCurl),
 		w.recentMenuItem(),
 		fyne.NewMenuItemSeparator(),
 		saveItem,
