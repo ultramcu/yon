@@ -47,6 +47,26 @@ func jumpHostSecretKeys(name string) (passphraseKey, passwordKey string) {
 		jumpHostKeyPrefix + base + ".password"
 }
 
+// Reserved .env key scheme for a Secret Variable's value. A secret Variable's
+// value lives in the same .env as the jump-host secrets, but under a key
+// NAMESPACED with the "__var." prefix and the owning environment's file base so
+// two environments that each declare a Secret with the SAME Variable.Key keep
+// their values in separate slots rather than sharing one (which would let a
+// later save clobber an earlier env's secret, losing data). This mirrors
+// jumpHostSecretKeys: the "<env>" segment is envFileBase(envName), giving each
+// environment its own reserved keys. The "__var." prefix is store-owned and
+// visually distinct from "__jumphost." in the committed-out .env, and the two
+// can never be confused (different leading segment) even though both are ours.
+const varKeyPrefix = "__var."
+
+// varSecretKey returns the reserved .env key for a Secret variable named varKey
+// in the environment named envName. Namespacing on envFileBase keeps each
+// environment's secrets in their own slot (like jumpHostSecretKeys), so a Secret
+// named "token" in env "A" and one in env "B" never share a single .env slot.
+func varSecretKey(envName, varKey string) string {
+	return varKeyPrefix + envFileBase(envName) + "." + varKey
+}
+
 // gitignoreName is the basename of the .gitignore maintained in the collection
 // directory so the .env secrets file is never committed.
 const gitignoreName = ".gitignore"
@@ -122,8 +142,11 @@ func envFilePath(collPath, name string) string {
 //
 // For each environment, non-secret variable values come from the environment's
 // JSON file; secret variable values (Variable.Secret == true) are filled in from
-// the collection's .env file, keyed by Variable.Key. A secret whose key is absent
-// from .env is left with an empty Value.
+// the collection's .env file, keyed by the per-environment reserved key
+// varSecretKey(env.Name, Variable.Key). For backward compatibility with .env
+// files written before secret-variable keys were namespaced, a missing
+// namespaced key falls back to the legacy bare Variable.Key. A secret absent
+// under both keys is left with an empty Value.
 //
 // It returns (nil, nil) when collPath is "" (an unsaved collection) or when the
 // environments directory does not exist. A file that fails to parse as JSON is
@@ -163,10 +186,20 @@ func LoadEnvironments(collPath string) ([]model.Environment, error) {
 			// Skip a corrupt environment file rather than failing the load.
 			continue
 		}
-		// Restore secret values from the .env file.
+		// Restore secret values from the .env file. Read the per-environment
+		// namespaced key first; if it is ABSENT from the map (two-value read
+		// distinguishes "namespaced present but empty" from "namespaced absent"),
+		// fall back to the legacy bare key so .env files written before secret
+		// keys were namespaced still resolve. The next SaveEnvironment migrates
+		// the value to the namespaced key.
 		for i := range env.Variables {
 			if env.Variables[i].Secret {
-				env.Variables[i].Value = secrets[env.Variables[i].Key]
+				nsKey := varSecretKey(env.Name, env.Variables[i].Key)
+				if v, ok := secrets[nsKey]; ok {
+					env.Variables[i].Value = v
+				} else {
+					env.Variables[i].Value = secrets[env.Variables[i].Key]
+				}
 			}
 		}
 		// Restore the jump host's secret fields from the reserved .env keys.
@@ -212,7 +245,12 @@ func SaveEnvironment(collPath string, env model.Environment) error {
 	newSecrets := make(map[string]string)
 	for i := range toWrite.Variables {
 		if toWrite.Variables[i].Secret {
-			newSecrets[toWrite.Variables[i].Key] = toWrite.Variables[i].Value
+			// Store under the per-environment namespaced key so two environments
+			// with a same-named Secret never share one .env slot. Any pre-fix
+			// legacy bare key is left in place (a not-yet-re-saved sibling env may
+			// still rely on it via Load's fallback); orphaned legacy bare keys are
+			// harmless and gitignored.
+			newSecrets[varSecretKey(env.Name, toWrite.Variables[i].Key)] = toWrite.Variables[i].Value
 			toWrite.Variables[i].Value = "" // never persist secret values in JSON
 		}
 	}
@@ -340,7 +378,11 @@ func secretKeysOf(collPath, name string) (map[string]struct{}, error) {
 	}
 	for _, v := range env.Variables {
 		if v.Secret {
-			keys[v.Key] = struct{}{}
+			// Collect the per-environment namespaced key (the slot Save writes).
+			// Legacy bare keys are intentionally NOT collected so they survive as
+			// a Load fallback for any sibling env not yet re-saved; an orphaned
+			// legacy bare key is harmless and gitignored.
+			keys[varSecretKey(name, v.Key)] = struct{}{}
 		}
 	}
 	// A jump host owns its reserved .env keys; include them so they are pruned
@@ -379,7 +421,11 @@ func allSecretKeys(collPath string) (map[string]bool, error) {
 		}
 		for _, v := range env.Variables {
 			if v.Secret {
-				used[v.Key] = true
+				// Namespaced var keys are env-specific (derived from this env's
+				// Name), so they are never shared; collecting them keeps a
+				// surviving env's secret from being pruned. Legacy bare keys are
+				// not collected — they remain only as a Load fallback.
+				used[varSecretKey(env.Name, v.Key)] = true
 			}
 		}
 		// Reserved jump-host keys are env-specific; derive them from the parsed
