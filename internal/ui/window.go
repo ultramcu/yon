@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -200,8 +201,10 @@ func (w *Window) buildSidebar() {
 		func() int { return len(w.coll.Requests) },
 		func() fyne.CanvasObject {
 			row := newVerbRow()
-			// Right-clicking a row offers Delete; confirmDeleteRequest prompts before
-			// it removes the Request from the Collection.
+			// Right-clicking a row offers Duplicate (inserts an independent copy
+			// after the row) then Delete; confirmDeleteRequest prompts before it
+			// removes the Request from the Collection.
+			row.onDuplicate = w.duplicateRequest
 			row.onDelete = w.confirmDeleteRequest
 			// Left-clicking a row opens it. Route through sidebar.Select (not
 			// openRequestTab) so OnSelected runs the full programmatic path:
@@ -358,6 +361,71 @@ func (w *Window) deleteRequest(idx int) {
 	w.sidebar.Refresh()
 	w.refreshSidebarCount()
 	w.updateStatusBar()
+}
+
+// duplicateName derives the copy's name: a named request gets a " copy" suffix
+// so it's distinguishable in the sidebar; an unnamed one stays empty (its row
+// shows the derived DisplayName). Pure, so it's directly testable.
+func duplicateName(name string) string {
+	if name == "" {
+		return ""
+	}
+	return name + " copy"
+}
+
+// duplicateRequest inserts an independent copy of the Request at idx directly
+// after it, then selects/opens the copy.
+//
+// The copy must be DEEP: a struct copy shares the Params/Headers backing arrays,
+// so editing the duplicate's params would silently corrupt the original — we
+// clone those slices to break the aliasing. Inserting at idx+1 shifts every later
+// element up by one, so the index-keyed state must move with them (mirrors the
+// re-index in deleteRequest, but upward):
+//   - Rebuild openTabs into a fresh map so every key k > idx becomes k+1 (keys
+//     <= idx unchanged), keeping the SAME *requestTab and syncing its rt.idx.
+//   - selectedID > idx → incremented so it keeps pointing at the same Request.
+//
+// Selecting idx+1 last (after the re-index) drives OnSelected for the new copy.
+func (w *Window) duplicateRequest(idx int) {
+	if idx < 0 || idx >= len(w.coll.Requests) {
+		return
+	}
+
+	// Deep copy: struct copy first, then clone the slices so the duplicate owns
+	// independent Params/Headers and can't mutate the original through a shared
+	// backing array. Auth/Body hold only scalars, so the struct copy suffices.
+	src := w.coll.Requests[idx]
+	dup := src
+	dup.Params = append([]model.Param(nil), src.Params...)
+	dup.Headers = append([]model.Param(nil), src.Headers...)
+	dup.Name = duplicateName(src.Name)
+
+	// Insert the copy at idx+1, shifting later elements up by one.
+	w.coll.Requests = slices.Insert(w.coll.Requests, idx+1, dup)
+
+	// Re-key openTabs into a fresh map: keys <= idx stay, keys > idx rise by one.
+	reindexed := make(map[int]*requestTab, len(w.openTabs))
+	for k, rt := range w.openTabs {
+		if k > idx {
+			k++
+		}
+		reindexed[k] = rt
+		rt.idx = k // keep each tab's own back-reference in sync
+	}
+	w.openTabs = reindexed
+
+	// A selection after the insertion point moves up with its Request.
+	if w.selectedID > idx {
+		w.selectedID++
+	}
+
+	w.markDirty()
+	w.sidebar.Refresh()
+	w.refreshSidebarCount()
+	w.updateStatusBar()
+
+	// Select via the sidebar so the new copy's selection + accent + tab all sync.
+	w.sidebar.Select(idx + 1)
 }
 
 // commitRequest writes an edited Request back into the Collection at idx and
@@ -790,12 +858,14 @@ type verbRow struct {
 	object fyne.CanvasObject
 
 	// id is the Collection request index this row currently shows; set() rebinds
-	// it per id in UpdateItem. onDelete (wired by buildSidebar) is invoked with id
-	// when the row's Delete context-menu item is chosen. onTap is invoked with id
-	// on a primary (left) click — see Tapped for why the row must be Tappable.
-	id       int
-	onDelete func(id int)
-	onTap    func(id int)
+	// it per id in UpdateItem. onDelete/onDuplicate (wired by buildSidebar) are
+	// invoked with id when the matching context-menu item is chosen. onTap is
+	// invoked with id on a primary (left) click — see Tapped for why the row must
+	// be Tappable.
+	id          int
+	onDelete    func(id int)
+	onDuplicate func(id int)
+	onTap       func(id int)
 }
 
 // newVerbRow builds an empty row; set() fills it per Request in UpdateItem.
@@ -859,17 +929,23 @@ func (r *verbRow) Tapped(*fyne.PointEvent) {
 	}
 }
 
-// TappedSecondary shows the row's right-click context menu — currently just
-// "Delete", which calls onDelete with this row's request index. Mirrors the
-// tappable-widget pattern used by tabClose/segButton.
+// TappedSecondary shows the row's right-click context menu: "Duplicate" then
+// "Delete", each calling its wired callback with this row's request index. Items
+// appear only when their callback is set; if none is, there's no menu to show.
+// Mirrors the tappable-widget pattern used by tabClose/segButton.
 func (r *verbRow) TappedSecondary(e *fyne.PointEvent) {
-	if r.onDelete == nil {
+	if r.onDuplicate == nil && r.onDelete == nil {
 		return
 	}
 	id := r.id
-	menu := fyne.NewMenu("",
-		fyne.NewMenuItem("Delete", func() { r.onDelete(id) }),
-	)
+	var items []*fyne.MenuItem
+	if r.onDuplicate != nil {
+		items = append(items, fyne.NewMenuItem("Duplicate", func() { r.onDuplicate(id) }))
+	}
+	if r.onDelete != nil {
+		items = append(items, fyne.NewMenuItem("Delete", func() { r.onDelete(id) }))
+	}
+	menu := fyne.NewMenu("", items...)
 	if c := fyne.CurrentApp().Driver().CanvasForObject(r); c != nil {
 		widget.ShowPopUpMenuAtPosition(menu, c, e.AbsolutePosition)
 	}
