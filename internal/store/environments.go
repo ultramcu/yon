@@ -26,6 +26,27 @@ const envFileExt = ".json"
 // collection (in the collection's own directory, not the environments dir).
 const dotenvName = ".env"
 
+// Reserved .env key scheme for a jump host's secret fields. A jump host's
+// Passphrase/Password live in the same .env as Secret variables but under keys
+// NAMESPACED with the "__jumphost." prefix so they can never collide with a
+// user Variable key (a Variable named "password" is stored under "password",
+// the jump host's under "__jumphost.<env>.password"). The "<env>" segment is
+// the environment's file base (see envFileBase), so distinct environments each
+// get their own reserved keys rather than overwriting one shared slot. The
+// double-underscore prefix keeps these store-owned keys visually distinct in
+// the committed-out .env and lets the load/prune code recognise them.
+const jumpHostKeyPrefix = "__jumphost."
+
+// jumpHostSecretKeys returns the reserved .env keys for the named environment's
+// jump-host Passphrase and Password. Keying on envFileBase(name) — the same
+// collision-resistant base used for the environment file — keeps each
+// environment's jump-host secrets in their own slots.
+func jumpHostSecretKeys(name string) (passphraseKey, passwordKey string) {
+	base := envFileBase(name)
+	return jumpHostKeyPrefix + base + ".passphrase",
+		jumpHostKeyPrefix + base + ".password"
+}
+
 // gitignoreName is the basename of the .gitignore maintained in the collection
 // directory so the .env secrets file is never committed.
 const gitignoreName = ".gitignore"
@@ -148,6 +169,12 @@ func LoadEnvironments(collPath string) ([]model.Environment, error) {
 				env.Variables[i].Value = secrets[env.Variables[i].Key]
 			}
 		}
+		// Restore the jump host's secret fields from the reserved .env keys.
+		if env.JumpHost != nil {
+			passphraseKey, passwordKey := jumpHostSecretKeys(env.Name)
+			env.JumpHost.Passphrase = secrets[passphraseKey]
+			env.JumpHost.Password = secrets[passwordKey]
+		}
 		envs = append(envs, env)
 	}
 
@@ -188,6 +215,25 @@ func SaveEnvironment(collPath string, env model.Environment) error {
 			newSecrets[toWrite.Variables[i].Key] = toWrite.Variables[i].Value
 			toWrite.Variables[i].Value = "" // never persist secret values in JSON
 		}
+	}
+
+	// Split the jump host's secret fields out the same way: copy the JumpHost,
+	// move Passphrase/Password into the .env under the reserved keys, and blank
+	// them in the committed JSON. Non-secret fields stay in the JSON. A nil
+	// JumpHost is left nil so the environment serializes byte-identically to one
+	// that never had a jump host.
+	if env.JumpHost != nil {
+		jh := *env.JumpHost // copy so we don't mutate the caller's value
+		passphraseKey, passwordKey := jumpHostSecretKeys(env.Name)
+		if jh.Passphrase != "" {
+			newSecrets[passphraseKey] = jh.Passphrase
+		}
+		if jh.Password != "" {
+			newSecrets[passwordKey] = jh.Password
+		}
+		jh.Passphrase = "" // never persist jump-host secrets in JSON
+		jh.Password = ""
+		toWrite.JumpHost = &jh
 	}
 
 	// Merge this environment's secret keys into the existing .env.
@@ -297,6 +343,13 @@ func secretKeysOf(collPath, name string) (map[string]struct{}, error) {
 			keys[v.Key] = struct{}{}
 		}
 	}
+	// A jump host owns its reserved .env keys; include them so they are pruned
+	// when this environment is deleted (they are env-specific, never shared).
+	if env.JumpHost != nil {
+		passphraseKey, passwordKey := jumpHostSecretKeys(name)
+		keys[passphraseKey] = struct{}{}
+		keys[passwordKey] = struct{}{}
+	}
 	return keys, nil
 }
 
@@ -328,6 +381,13 @@ func allSecretKeys(collPath string) (map[string]bool, error) {
 			if v.Secret {
 				used[v.Key] = true
 			}
+		}
+		// Reserved jump-host keys are env-specific; derive them from the parsed
+		// env's Name so a surviving environment's keys are not pruned.
+		if env.JumpHost != nil {
+			passphraseKey, passwordKey := jumpHostSecretKeys(env.Name)
+			used[passphraseKey] = true
+			used[passwordKey] = true
 		}
 	}
 	return used, nil

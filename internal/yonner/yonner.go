@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -37,6 +38,14 @@ type Options struct {
 	// A nil Resolve is treated as the identity function, so requests are sent
 	// verbatim and existing behaviour is unchanged.
 	Resolve func(string) string
+	// DialContext, when non-nil, replaces the transport's TCP dialer so every
+	// Request is dialed THROUGH it instead of straight from this host. The
+	// tunnel manager supplies the SSH-backed dialer for the active Environment's
+	// jump host (see internal/tunnel); the target URL is never rewritten — only
+	// how its connection is opened changes. nil = dial directly (today's
+	// behaviour). When set, newClient also disables the HTTP proxy so the proxy
+	// is not dialed through the SSH connection (ADR 0001).
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // resolve applies o.Resolve to s, treating a nil Resolve as the identity
@@ -215,6 +224,17 @@ func newClient(opts Options) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if opts.InsecureTLS {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in app-level toggle
+	}
+
+	// SSH jump host: route every connection through the supplied dialer and turn
+	// OFF the HTTP proxy. Otherwise the cloned DefaultTransport would still try to
+	// reach HTTP_PROXY/HTTPS_PROXY — and it would do so THROUGH the SSH tunnel,
+	// which is never what's wanted (ADR 0001). When DialContext is nil the
+	// transport is left exactly as the clone above, so proxy and the default
+	// dialer are honoured and existing behaviour is unchanged.
+	if opts.DialContext != nil {
+		transport.DialContext = opts.DialContext
+		transport.Proxy = nil
 	}
 
 	client := &http.Client{
