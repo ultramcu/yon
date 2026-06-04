@@ -105,6 +105,12 @@ type responseView struct {
 	bodyStack  *fyne.Container
 	bodyScroll *container.Scroll
 
+	// respTabs is the Body/Headers segmented sub-tab control (same component as the
+	// request editor). Body is the default tab and gives bodyStack the full pane;
+	// Headers holds the headersGrid. headersSeg is its button, for the count badge.
+	respTabs   *segTabs
+	headersSeg *segButton
+
 	// fullBody is the complete response body, retained even when the display is
 	// truncated, so "Save to file" always writes everything.
 	fullBody []byte
@@ -223,20 +229,14 @@ func newResponseView(parent fyne.Window) *responseView {
 	rv.bodyScroll = container.NewVScroll(rv.bodyGrid)
 	rv.bodyStack = container.NewStack(rv.bodyScroll, rv.bodyList)
 
-	// Left column: response HEADERS (key cyan / value), beside the body on the
-	// right, as an HSplit (mockup-v2 `.resp-body-wrap`).
-	headersTitle := canvas.NewText("HEADERS", theme.Color(theme.ColorNamePlaceHolder))
-	headersTitle.TextStyle = fyne.TextStyle{Bold: true}
-	headersTitle.TextSize = theme.TextSize() - 3
-	headersCol := container.NewBorder(
-		container.NewPadded(headersTitle), nil, nil, nil,
-		container.NewVScroll(rv.headersGrid),
-	)
+	// Body / Headers sub-tabs (same segTabs component as the request editor) so the
+	// body gets the FULL pane. Body is appended first and is therefore the active
+	// tab; the response HEADERS (key cyan / value) move into the Headers tab.
+	rv.respTabs = newSegTabs()
+	rv.respTabs.Append("Body", rv.bodyStack)
+	rv.headersSeg = rv.respTabs.Append("Headers", container.NewVScroll(rv.headersGrid))
 
-	split := container.NewHSplit(headersCol, rv.bodyStack)
-	split.SetOffset(0.26) // headers strip is the narrower pane (mockup ~268/1180)
-
-	rv.container = container.NewBorder(header, nil, nil, nil, split)
+	rv.container = container.NewBorder(header, nil, nil, nil, rv.respTabs.object())
 
 	// Initialise the pill to the neutral "no response yet" tint.
 	rv.applyStatusPill(color.Gray{Y: 0x88})
@@ -298,6 +298,10 @@ func (rv *responseView) openFind() {
 		return
 	}
 	rv.findActive = true
+	// Find highlights matches in the body grid, so surface the Body tab.
+	if rv.respTabs != nil {
+		rv.respTabs.Select(0)
+	}
 	text := rv.findDisplayText()
 	rv.bodyList.Hide()
 	rv.bodyGrid.SetText(text)
@@ -351,6 +355,7 @@ func (rv *responseView) setPending() {
 	rv.contentType = ""
 	rv.clearBody()
 	rv.headersGrid.SetText("")
+	rv.setHeadersBadge(0)
 }
 
 // setError shows a transport/timeout/cancel error in place of a response.
@@ -366,6 +371,7 @@ func (rv *responseView) setError(err error) {
 	rv.contentType = ""
 	rv.clearBody()
 	rv.headersGrid.SetText("")
+	rv.setHeadersBadge(0)
 }
 
 // setResponse renders a completed Response.
@@ -431,6 +437,16 @@ func (rv *responseView) renderHeaders(headers []model.Param) {
 		}
 	}
 	rv.headersGrid.Refresh()
+
+	rv.setHeadersBadge(len(sorted))
+}
+
+// setHeadersBadge shows the header count on the Headers sub-tab ("Headers 5"),
+// or just "Headers" when there are none. Safe before the segment exists (no-op).
+func (rv *responseView) setHeadersBadge(n int) {
+	if rv.headersSeg != nil {
+		rv.headersSeg.setLabel(tabBadge("Headers", n))
+	}
 }
 
 // bodyKind classifies a response body for the Pretty path: which formatter and
