@@ -134,6 +134,30 @@ type Request struct {
 	Auth     Auth    `json:"auth"`
 	Body     Body    `json:"body"`
 	FolderID string  `json:"folderId,omitempty"` // owning Folder id, or "" for top-level
+	// Options holds per-request connection overrides (timeout, TLS verification,
+	// redirect following). A nil Options — the default — means "inherit the global
+	// Settings", and thanks to the pointer + omitempty it serializes with NO
+	// "options" key, so a Request created before this field existed stays
+	// byte-identical on disk. See RequestOptions for the per-field tri-state.
+	Options *RequestOptions `json:"options,omitempty"`
+}
+
+// RequestOptions are the per-request connection overrides layered on top of the
+// global Settings. Each field is a pointer so it is tri-state: nil = "inherit
+// the global value", non-nil = "override with this value". omitempty drops any
+// unset field from the JSON, and a wholly-empty RequestOptions still serializes
+// as {} — but Request only carries a non-nil *RequestOptions when something is
+// actually overridden (see the UI's value()), so unset requests omit the key
+// entirely. yonner.ApplyRequestOptions overlays these onto yonner.Options.
+type RequestOptions struct {
+	// TimeoutSeconds overrides the total request time budget, in whole seconds.
+	// A value <= 0 means "no client timeout" (matches yonner.Options.Timeout).
+	TimeoutSeconds *int `json:"timeoutSeconds,omitempty"`
+	// InsecureTLS overrides TLS certificate verification (true = skip verify).
+	InsecureTLS *bool `json:"insecureTLS,omitempty"`
+	// FollowRedirects overrides redirect following (false = return the first
+	// redirect response instead of following it).
+	FollowRedirects *bool `json:"followRedirects,omitempty"`
 }
 
 // Collection is a flat, ordered list of Requests persisted as one .yon file.

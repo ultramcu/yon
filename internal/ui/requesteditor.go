@@ -76,6 +76,7 @@ type requestTab struct {
 	authEditor  *authEditor
 	bodyTypeSel *widget.Select
 	bodyEntry   *widget.Entry
+	optionsTab  *requestOptionsTab
 
 	sendBtn *widget.Button
 
@@ -182,6 +183,11 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.headerSeg = rt.segTabs.Append("Headers", rt.headerTable.container)
 	rt.segTabs.Append("Auth", container.NewVScroll(rt.authEditor.container))
 	rt.segTabs.Append("Body", bodyPane)
+	// Build the Options sub-tab before refreshTabBadges/anything calls current():
+	// newRequestOptionsTab wires its controls to rt.commit(), and current() reads
+	// rt.optionsTab.value(), so optionsTab must exist before either can fire.
+	rt.optionsTab = newRequestOptionsTab(rt, req)
+	rt.segTabs.Append("Options", rt.optionsTab.container)
 	rt.refreshTabBadges() // initial counts from the seeded Request
 
 	editorTop := container.NewVBox(
@@ -264,6 +270,13 @@ func (rt *requestTab) formatXMLBody() {
 // storing the query in both places would send it twice.
 func (rt *requestTab) current() model.Request {
 	urlBase, _ := splitURLQuery(rt.urlEntry.Text)
+	// Options can be read very early (a construction-time commit may fire before
+	// the Options sub-tab is built), so nil-guard it: nil optionsTab → nil
+	// Options → "inherit the global Settings".
+	var options *model.RequestOptions
+	if rt.optionsTab != nil {
+		options = rt.optionsTab.value()
+	}
 	return model.Request{
 		Name:    rt.nameEntry.Text,
 		Method:  model.Method(strings.ToUpper(rt.methodSel.Text)),
@@ -275,6 +288,7 @@ func (rt *requestTab) current() model.Request {
 			Type:    bodyTypeFromLabel(rt.bodyTypeSel.Selected),
 			Content: rt.bodyEntry.Text,
 		},
+		Options: options,
 	}
 }
 
@@ -326,7 +340,11 @@ func (rt *requestTab) showCurl() {
 	// variables, matching startSend, so the copied curl reflects the request
 	// that is actually sent rather than literal (and URL-escaped) {{names}}.
 	opts.Resolve = rt.win.varScope().Resolve
-	cmd := yonner.ToCurl(rt.current(), rt.win.coll, opts)
+	// Overlay this request's per-request overrides so the copied curl reflects
+	// them (--max-time, -k, and -L / no -L).
+	req := rt.current()
+	opts = yonner.ApplyRequestOptions(opts, req.Options)
+	cmd := yonner.ToCurl(req, rt.win.coll, opts)
 
 	entry := widget.NewMultiLineEntry()
 	entry.SetText(cmd)
@@ -400,6 +418,9 @@ func (rt *requestTab) startSend() {
 	if jh, ok := rt.win.app.activeJumpHost(rt.win); ok {
 		opts.DialContext = rt.win.app.tunnels.DialContext(jh)
 	}
+	// Overlay this request's per-request overrides (timeout, TLS, redirects) onto
+	// the global options for the SAME req that is sent below.
+	opts = yonner.ApplyRequestOptions(opts, req.Options)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.sendSeq++

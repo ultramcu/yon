@@ -68,6 +68,30 @@ func DefaultOptions() Options {
 	}
 }
 
+// ApplyRequestOptions overlays a Request's per-request overrides onto base
+// (the global options). A nil ro, or a nil field within it, leaves the
+// corresponding base value unchanged. Resolve and DialContext are never
+// touched. base is taken by value, so callers get a copy and the global
+// options are not mutated.
+func ApplyRequestOptions(base Options, ro *model.RequestOptions) Options {
+	if ro == nil {
+		return base
+	}
+	if ro.TimeoutSeconds != nil {
+		// A value <= 0 means "no client timeout" — time.Duration(<=0)*Second is
+		// <= 0, which Options.Timeout already treats as no timeout, so the
+		// semantics carry through without a special case.
+		base.Timeout = time.Duration(*ro.TimeoutSeconds) * time.Second
+	}
+	if ro.InsecureTLS != nil {
+		base.InsecureTLS = *ro.InsecureTLS
+	}
+	if ro.FollowRedirects != nil {
+		base.FollowRedirects = *ro.FollowRedirects
+	}
+	return base
+}
+
 // headerAuthorization is the canonical Authorization header name.
 const headerAuthorization = "Authorization"
 
