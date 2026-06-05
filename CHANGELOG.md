@@ -4,6 +4,15 @@ All notable changes to Yon are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Yon adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-06-05
+
+### Added
+- **Per-request overrides** ([#26]) — a new **Options** tab in the request editor
+  lets a Request override the global *timeout*, *Allow insecure TLS*, and *Follow
+  redirects* settings; left on *Default*, each inherits the global Setting.
+  Overrides also flow into *Copy as cURL* (`--max-time` / `-k` / `-L`). Requests
+  with no overrides are unchanged on disk.
+
 ## [0.13.2] - 2026-06-04
 
 ### Fixed
@@ -278,6 +287,7 @@ All notable changes to Yon are documented here. The format follows
   the response; save and reopen Collections as human-readable `.yon` files.
   Native builds for macOS (universal), Windows, and Linux.
 
+[0.14.0]: https://github.com/ultramcu/yon/releases/tag/v0.14.0
 [0.13.2]: https://github.com/ultramcu/yon/releases/tag/v0.13.2
 [0.13.1]: https://github.com/ultramcu/yon/releases/tag/v0.13.1
 [0.13.0]: https://github.com/ultramcu/yon/releases/tag/v0.13.0
@@ -308,3 +318,4 @@ All notable changes to Yon are documented here. The format follows
 [#23]: https://github.com/ultramcu/yon/issues/23
 [#24]: https://github.com/ultramcu/yon/issues/24
 [#25]: https://github.com/ultramcu/yon/issues/25
+[#26]: https://github.com/ultramcu/yon/issues/26
