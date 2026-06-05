@@ -7,7 +7,6 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
@@ -79,6 +78,10 @@ type requestTab struct {
 	bodyEntry   *widget.Entry
 	optionsTab  *requestOptionsTab
 	testsTab    *testsTab
+	// curlEntry shows the equivalent curl command in the "cURL" sub-tab. Its text
+	// is not part of the request model — refreshCurl rebuilds it on every commit,
+	// so any user edit to it is harmless (overwritten on the next refresh).
+	curlEntry *widget.Entry
 
 	sendBtn *widget.Button
 
@@ -162,18 +165,14 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	rt.sendBtn = widget.NewButtonWithIcon("Send", theme.MailSendIcon(), rt.onSend)
 	rt.sendBtn.Importance = widget.HighImportance
 
-	// "cURL" shows the equivalent curl command for the current request.
-	curlBtn := widget.NewButton("cURL", rt.showCurl)
-	curlBtn.Importance = widget.LowImportance
-
-	// Top bar: [Method ▾][URL.................][cURL][✈ Send] — the Method Select
-	// renders as a "GET ▾" pill and Send is the primary (cyan) action. The method
-	// box is given a fixed width so the longest verb ("OPTIONS") and the dropdown
-	// arrow are never clipped (the SelectEntry's own MinSize is too narrow).
+	// Top bar: [Method ▾][URL.................][✈ Send] — the Method Select renders
+	// as a "GET ▾" pill and Send is the primary (cyan) action. The method box is
+	// given a fixed width so the longest verb ("OPTIONS") and the dropdown arrow
+	// are never clipped (the SelectEntry's own MinSize is too narrow). The "Copy as
+	// cURL" command now lives in the "cURL" sub-tab below, not a top-bar button.
 	methodBox := container.NewGridWrap(
 		fyne.NewSize(112, rt.methodSel.MinSize().Height), rt.methodSel)
-	topBar := container.NewBorder(nil, nil, methodBox,
-		container.NewHBox(curlBtn, rt.sendBtn), rt.urlEntry)
+	topBar := container.NewBorder(nil, nil, methodBox, rt.sendBtn, rt.urlEntry)
 
 	rt.paramsTable = newKVTable(syncedParams, func() { rt.onParamsEdited() })
 	rt.headerTable = newKVTable(req.Headers, func() { rt.commit() })
@@ -197,6 +196,11 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	// with saved captures/assertions does not dirty a fresh tab.
 	rt.testsTab = newTestsTab(rt, req)
 	rt.segTabs.Append("Tests", rt.testsTab.container)
+	// cURL sub-tab (read-and-copy view of the equivalent curl command). Appended
+	// last; seeded with refreshCurl below once every sub-editor (incl. options/
+	// tests) exists, so current() — which curlCommand() reads — is complete.
+	rt.segTabs.Append("cURL", rt.buildCurlTab())
+	rt.refreshCurl()
 	rt.refreshTabBadges() // initial counts from the seeded Request
 
 	editorTop := container.NewVBox(
@@ -349,39 +353,51 @@ func (rt *requestTab) onParamsEdited() {
 func (rt *requestTab) commit() {
 	rt.dirty = true
 	rt.refreshTabBadges()
+	rt.refreshCurl() // keep the cURL sub-tab live as the user edits
 	rt.win.commitRequest(rt.idx, rt.current())
 	rt.win.updateStatusBar()
 }
 
-// showCurl displays the equivalent curl command for the current request in a
-// dialog with a Copy button.
-func (rt *requestTab) showCurl() {
+// curlCommand builds the equivalent curl command for the current request,
+// matching what startSend would actually send: it expands {{variable}} templates
+// with the active environment + collection variables (so the copied curl uses the
+// resolved values rather than literal, URL-escaped {{names}}) and overlays this
+// request's per-request overrides (--max-time, -k, and -L / no -L).
+func (rt *requestTab) curlCommand() string {
 	opts := rt.win.app.settings.options()
-	// Expand {{variable}} templates with the active environment + collection
-	// variables, matching startSend, so the copied curl reflects the request
-	// that is actually sent rather than literal (and URL-escaped) {{names}}.
 	opts.Resolve = rt.win.varScope().Resolve
-	// Overlay this request's per-request overrides so the copied curl reflects
-	// them (--max-time, -k, and -L / no -L).
 	req := rt.current()
 	opts = yonner.ApplyRequestOptions(opts, req.Options)
-	cmd := yonner.ToCurl(req, rt.win.coll, opts)
+	return yonner.ToCurl(req, rt.win.coll, opts)
+}
 
-	entry := widget.NewMultiLineEntry()
-	entry.SetText(cmd)
-	entry.Wrapping = fyne.TextWrapBreak
+// buildCurlTab constructs the "cURL" sub-tab: a wrapped, multiline Entry showing
+// the equivalent curl command and a Copy button below it. The Entry has no
+// OnChanged (its text is not part of the request model — refreshCurl overwrites
+// it on every commit), so editing it neither dirties the tab nor is persisted.
+func (rt *requestTab) buildCurlTab() fyne.CanvasObject {
+	rt.curlEntry = widget.NewMultiLineEntry()
+	rt.curlEntry.Wrapping = fyne.TextWrapBreak
 
 	copyBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
 		if a := fyne.CurrentApp(); a != nil {
-			a.Clipboard().SetContent(cmd)
+			a.Clipboard().SetContent(rt.curlEntry.Text)
 		}
 	})
 	copyBtn.Importance = widget.HighImportance
 
-	content := container.NewBorder(nil, copyBtn, nil, nil, entry)
-	d := dialog.NewCustom("Copy as cURL", "Close", content, rt.win.win)
-	d.Resize(fyne.NewSize(660, 300))
-	d.Show()
+	return container.NewBorder(nil, copyBtn, nil, nil, rt.curlEntry)
+}
+
+// refreshCurl rebuilds the cURL sub-tab's text from the current request. Called
+// from commit(), so it is nil-guarded: a construction-time commit can fire before
+// buildCurlTab has assigned curlEntry. SetText carries no OnChanged, so the
+// refresh never commits back (a fresh tab stays non-dirty).
+func (rt *requestTab) refreshCurl() {
+	if rt.curlEntry == nil {
+		return
+	}
+	rt.curlEntry.SetText(rt.curlCommand())
 }
 
 // enabledParamCount counts the rows that are both enabled and have content
