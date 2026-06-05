@@ -1,7 +1,11 @@
 # testserver
 
 A tiny stdlib-only HTTP server that exercises every feature of **Yon**, plus
-`testserver.yon` — a ready-made collection of 13 requests pointing at it.
+`testserver.yon` — a ready-made collection pointing at it. It includes a
+**Tests & Chaining** folder that demonstrates the newer features: response
+**assertions** (Tests tab), **capturing** a value into a variable, **chaining**
+it into a follow-up request (`{{userId}}`), and a **per-request override**
+(don't follow a redirect).
 
 ## Run
 
