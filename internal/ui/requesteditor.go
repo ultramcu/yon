@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -477,9 +478,19 @@ func (rt *requestTab) startSend() {
 			}
 			rt.cancel = nil
 			rt.setSending(false)
+			// Resolve the request URL once for the combined request log, so the log
+			// records the real target (env/collection value) rather than {{templates}}.
+			resolvedURL := rt.win.varScope().Resolve(req.URL)
 			if err != nil {
 				rt.lastResp = nil
 				rt.response.setError(err)
+				rt.win.appendLog(logEntry{
+					Time:   time.Now(),
+					Name:   req.DisplayName(),
+					Method: string(req.Method),
+					URL:    resolvedURL,
+					Err:    err.Error(),
+				})
 				rt.win.updateStatusBar()
 				return
 			}
@@ -507,6 +518,17 @@ func (rt *requestTab) startSend() {
 			}
 			results := postresp.RunAssertions(resp, req.Assertions)
 			rt.response.setTestResults(results, vars)
+
+			rt.win.appendLog(logEntry{
+				Time:       time.Now(),
+				Name:       req.DisplayName(),
+				Method:     string(req.Method),
+				URL:        resolvedURL,
+				Status:     resp.Status,
+				StatusText: resp.StatusText,
+				Duration:   resp.Duration,
+				Size:       resp.Size,
+			})
 
 			rt.win.updateStatusBar()
 		})

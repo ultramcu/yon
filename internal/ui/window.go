@@ -136,6 +136,17 @@ type Window struct {
 	varsVisible bool
 	varsToggle  *canvas.Text
 
+	// reqLog is the combined HTTP request log: one entry per send (success or
+	// error), newest last. It is capped at maxLogEntries (oldest dropped) and is
+	// SESSION-ONLY — never persisted to disk. logPanel is the bottom-docked log
+	// widget (Dev A's), logVisible tracks whether it is docked (seeded from
+	// Preferences on construct so it re-opens at the same state next launch), and
+	// logToggle is the footer "Log" tappable that flips it.
+	reqLog     []logEntry
+	logPanel   *logPanel
+	logVisible bool
+	logToggle  *canvas.Text
+
 	// contentSplit is the inner sidebar|editor HSplit; it is reused (never
 	// rebuilt) across Variables-panel toggles so its drag offset — the user's
 	// sidebar/editor sizing — is preserved. contentTop/contentBottom are the
@@ -150,6 +161,14 @@ type Window struct {
 // prefKeyVarsPanelOpen persists whether the right-side Variables dock is open,
 // so it re-opens at the same state on next launch (default closed/hidden).
 const prefKeyVarsPanelOpen = "ui.varsPanelOpen"
+
+// prefKeyLogPanelOpen persists whether the bottom-side Request Log dock is open,
+// so it re-opens at the same state on next launch (default closed/hidden).
+const prefKeyLogPanelOpen = "ui.logPanelOpen"
+
+// maxLogEntries caps the in-memory request log so a long session can't grow it
+// without bound; appendLog drops the oldest entries past this many.
+const maxLogEntries = 1000
 
 // newWindow builds (but does not Show) a Window for coll. path is "" for an
 // untitled Collection.
@@ -175,6 +194,11 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	w.varsPanel = newVarsPanel(w)
 	w.varsVisible = w.app.prefs().BoolWithFallback(prefKeyVarsPanelOpen, false)
 
+	// Build the bottom Request Log dock alongside the Variables dock. Seed its
+	// open/closed state from Preferences (default hidden), same as the vars dock.
+	w.logPanel = newLogPanel(w)
+	w.logVisible = w.app.prefs().BoolWithFallback(prefKeyLogPanelOpen, false)
+
 	split := container.NewHSplit(
 		container.NewBorder(w.buildSidebarHeader(), nil, nil, nil, w.sidebar),
 		w.tabs.object(),
@@ -186,6 +210,10 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	if w.varsVisible {
 		w.varsPanel.refresh()
 		w.syncVarsToggle()
+	}
+	if w.logVisible {
+		w.logPanel.refresh()
+		w.syncLogToggle()
 	}
 	w.applyContent()
 	w.updateStatusBar()
@@ -241,6 +269,15 @@ func (w *Window) applyContent() {
 		outer.SetOffset(0.78)
 		center = outer
 	}
+	// The Request Log docks at the BOTTOM, composing with the optional right vars
+	// dock: a fresh outer VSplit of [center | log panel]. When the log is hidden
+	// the center is unchanged, so log+vars both hidden is byte-identical to the
+	// original Border.
+	if w.logVisible && w.logPanel != nil {
+		vs := container.NewVSplit(center, w.logPanel.container)
+		vs.SetOffset(0.75)
+		center = vs
+	}
 	w.win.SetContent(container.NewBorder(w.contentTop, w.contentBottom, nil, nil, center))
 }
 
@@ -281,6 +318,64 @@ func (w *Window) syncVarsToggle() {
 		w.varsToggle.TextStyle = fyne.TextStyle{}
 	}
 	w.varsToggle.Refresh()
+}
+
+// appendLog records one finished send (success or error) in the combined request
+// log, newest last, then refreshes the log dock (a no-op while it is hidden). The
+// log is capped at maxLogEntries: once it would exceed that, the oldest entries
+// are dropped so a long session can't grow it without bound.
+func (w *Window) appendLog(e logEntry) {
+	w.reqLog = append(w.reqLog, e)
+	if len(w.reqLog) > maxLogEntries {
+		w.reqLog = w.reqLog[len(w.reqLog)-maxLogEntries:]
+	}
+	w.refreshLogPanel()
+}
+
+// clearLog empties the request log and refreshes the dock. Wired to the log
+// panel's Clear button (via the contract w.clearLog()).
+func (w *Window) clearLog() {
+	w.reqLog = nil
+	w.refreshLogPanel()
+}
+
+// refreshLogPanel re-renders the Request Log dock, but only when it is actually
+// docked — hidden, it is a cheap no-op (the panel re-reads on its next open).
+func (w *Window) refreshLogPanel() {
+	if w.logPanel != nil && w.logVisible {
+		w.logPanel.refresh()
+	}
+}
+
+// toggleLogPanel shows/hides the bottom Request Log dock. Becoming visible
+// refreshes the panel first (so it reflects the current log), then the center is
+// rebuilt via applyContent, the footer toggle restyled, and the new open/closed
+// state persisted so it survives a restart.
+func (w *Window) toggleLogPanel() {
+	w.logVisible = !w.logVisible
+	if w.logVisible && w.logPanel != nil {
+		w.logPanel.refresh()
+	}
+	w.applyContent()
+	w.syncLogToggle()
+	w.app.prefs().SetBool(prefKeyLogPanelOpen, w.logVisible)
+}
+
+// syncLogToggle restyles the footer "Log" toggle to reflect the dock's state:
+// accented + bold while open, muted while closed. Safe before the toggle is built
+// (no-op).
+func (w *Window) syncLogToggle() {
+	if w.logToggle == nil {
+		return
+	}
+	if w.logVisible {
+		w.logToggle.Color = theme.Color(theme.ColorNamePrimary)
+		w.logToggle.TextStyle = fyne.TextStyle{Bold: true}
+	} else {
+		w.logToggle.Color = theme.Color(theme.ColorNamePlaceHolder)
+		w.logToggle.TextStyle = fyne.TextStyle{}
+	}
+	w.logToggle.Refresh()
 }
 
 // buildSidebarHeader is the collection header above the request list: a folder
@@ -1196,8 +1291,12 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 	)
 	// View ▸ Variables toggles the right-side Variables dock (the footer
 	// "Variables" tap does the same); both call toggleVarsPanel.
+	// View ▸ Variables toggles the right-side Variables dock; View ▸ Request Log
+	// toggles the bottom Request Log dock (the footer "Variables"/"Log" taps do the
+	// same). They call toggleVarsPanel / toggleLogPanel respectively.
 	viewMenu := fyne.NewMenu("View",
 		fyne.NewMenuItem("Variables", w.toggleVarsPanel),
+		fyne.NewMenuItem("Request Log", w.toggleLogPanel),
 	)
 	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
 	// system application menu (the one named after the app) — and "About" replaces
@@ -1639,11 +1738,18 @@ func (w *Window) buildStatusBar() fyne.CanvasObject {
 	w.varsToggle = mk("Variables")
 	varsTap := newTappable(w.varsToggle, w.toggleVarsPanel)
 
-	// Left: version · status · time · size · jump-host · vars. Right: method · path.
-	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta, tunnelTap, varsTap)
+	// Footer "Log" toggle: a tappable label that shows/hides the bottom Request
+	// Log dock (also reachable via View ▸ Request Log); both call toggleLogPanel.
+	// Wrapped like the vars toggle since canvas.Text isn't tappable on its own.
+	w.logToggle = mk("Log")
+	logTap := newTappable(w.logToggle, w.toggleLogPanel)
+
+	// Left: version · status · time · size · jump-host · vars · log. Right: method · path.
+	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta, tunnelTap, varsTap, logTap)
 	bar := container.NewBorder(nil, nil, left, w.sbReqInfo)
 
 	w.syncVarsToggle()
+	w.syncLogToggle()
 
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameMenuBackground))
 	return container.NewStack(bg, container.NewPadded(bar))
