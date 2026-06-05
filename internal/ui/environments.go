@@ -125,6 +125,7 @@ func (w *Window) buildEnvSelector() fyne.CanvasObject {
 			// Clearing the active environment drops any jump-host binding.
 			w.app.rebindTunnel(w)
 			w.updateTunnelIndicator()
+			w.refreshVarsPanel()
 		default:
 			if w.coll.ActiveEnvironment != choice {
 				w.coll.ActiveEnvironment = choice
@@ -133,6 +134,7 @@ func (w *Window) buildEnvSelector() fyne.CanvasObject {
 			// Follow the new active environment's jump host (if any).
 			w.app.rebindTunnel(w)
 			w.updateTunnelIndicator()
+			w.refreshVarsPanel()
 		}
 	}
 	return sel
@@ -814,6 +816,7 @@ func (w *Window) persistEnvironments(working []model.Environment, collVars []mod
 
 	w.loadEnvironments()
 	w.syncEnvSelector()
+	w.refreshVarsPanel()
 }
 
 // promptSaveBeforeEnvironments tells the user that environments need a saved

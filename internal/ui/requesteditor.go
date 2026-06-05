@@ -501,6 +501,9 @@ func (rt *requestTab) startSend() {
 				for k, v := range vars {
 					rt.win.runtimeVars[k] = v
 				}
+				// Captured runtime vars changed — refresh the Variables dock (no-op
+				// when hidden) so it reflects the new highest-precedence values.
+				rt.win.refreshVarsPanel()
 			}
 			results := postresp.RunAssertions(resp, req.Assertions)
 			rt.response.setTestResults(results, vars)

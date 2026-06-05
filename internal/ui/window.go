@@ -127,7 +127,29 @@ type Window struct {
 	updateLabel  *widget.Label
 	pendingRel   updater.Release
 	pendingAsset updater.Asset
+
+	// varsPanel is the right-side Variables dock (Dev A's widget). varsVisible
+	// tracks whether it is currently docked; it is seeded from Preferences on
+	// construct so the panel re-opens at the same open/closed state next launch.
+	// varsToggle is the footer "Variables" tappable that flips it.
+	varsPanel   *varsPanel
+	varsVisible bool
+	varsToggle  *canvas.Text
+
+	// contentSplit is the inner sidebar|editor HSplit; it is reused (never
+	// rebuilt) across Variables-panel toggles so its drag offset — the user's
+	// sidebar/editor sizing — is preserved. contentTop/contentBottom are the
+	// fixed banner and status-bar rows of the window's Border layout, kept so
+	// applyContent can rebuild only the center (split, optionally wrapped in an
+	// outer HSplit with the Variables panel) without rebuilding them.
+	contentSplit  *container.Split
+	contentTop    fyne.CanvasObject
+	contentBottom fyne.CanvasObject
 }
+
+// prefKeyVarsPanelOpen persists whether the right-side Variables dock is open,
+// so it re-opens at the same state on next launch (default closed/hidden).
+const prefKeyVarsPanelOpen = "ui.varsPanelOpen"
 
 // newWindow builds (but does not Show) a Window for coll. path is "" for an
 // untitled Collection.
@@ -147,12 +169,25 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	w.buildTabs()
 	w.buildMenu()
 
+	// Build the Variables dock after buildSidebar/buildTabs so its constructor's
+	// reads (env/collection/runtime vars) see a fully-wired window. Seed its
+	// open/closed state from Preferences (default hidden).
+	w.varsPanel = newVarsPanel(w)
+	w.varsVisible = w.app.prefs().BoolWithFallback(prefKeyVarsPanelOpen, false)
+
 	split := container.NewHSplit(
 		container.NewBorder(w.buildSidebarHeader(), nil, nil, nil, w.sidebar),
 		w.tabs.object(),
 	)
 	split.SetOffset(0.22)
-	w.win.SetContent(container.NewBorder(w.buildUpdateBanner(), w.buildStatusBar(), nil, nil, split))
+	w.contentSplit = split
+	w.contentTop = w.buildUpdateBanner()
+	w.contentBottom = w.buildStatusBar()
+	if w.varsVisible {
+		w.varsPanel.refresh()
+		w.syncVarsToggle()
+	}
+	w.applyContent()
 	w.updateStatusBar()
 
 	// Cmd/Ctrl+F opens find on the active response (also in Edit ▸ Find…); Esc
@@ -190,6 +225,62 @@ func newWindow(app *App, coll model.Collection, path string) *Window {
 	w.win.SetCloseIntercept(w.onCloseRequested)
 	w.updateTitle()
 	return w
+}
+
+// applyContent sets the window content to the standard banner|status-bar Border
+// around a center region. When the Variables dock is hidden the center is the
+// inner sidebar|editor split alone — byte-for-byte the original layout. When it
+// is visible the center is a fresh outer HSplit of [that same split | the
+// Variables panel]. The inner split object (w.contentSplit) is REUSED in both
+// cases, so its drag offset (the user's sidebar/editor sizing) is never reset by
+// a toggle; only the outer wrapper is rebuilt.
+func (w *Window) applyContent() {
+	center := fyne.CanvasObject(w.contentSplit)
+	if w.varsVisible && w.varsPanel != nil {
+		outer := container.NewHSplit(w.contentSplit, w.varsPanel.container)
+		outer.SetOffset(0.78)
+		center = outer
+	}
+	w.win.SetContent(container.NewBorder(w.contentTop, w.contentBottom, nil, nil, center))
+}
+
+// toggleVarsPanel shows/hides the right-side Variables dock. Becoming visible
+// refreshes the panel first (so it reflects current vars), then the center is
+// rebuilt via applyContent, the footer toggle restyled, and the new open/closed
+// state persisted so it survives a restart.
+func (w *Window) toggleVarsPanel() {
+	w.varsVisible = !w.varsVisible
+	if w.varsVisible && w.varsPanel != nil {
+		w.varsPanel.refresh()
+	}
+	w.applyContent()
+	w.syncVarsToggle()
+	w.app.prefs().SetBool(prefKeyVarsPanelOpen, w.varsVisible)
+}
+
+// refreshVarsPanel re-renders the Variables dock, but only when it is actually
+// docked — hidden, it is a cheap no-op (the panel re-reads on its next open).
+func (w *Window) refreshVarsPanel() {
+	if w.varsPanel != nil && w.varsVisible {
+		w.varsPanel.refresh()
+	}
+}
+
+// syncVarsToggle restyles the footer "Variables" toggle to reflect the dock's
+// state: accented + bold while open, muted while closed. Safe before the toggle
+// is built (no-op).
+func (w *Window) syncVarsToggle() {
+	if w.varsToggle == nil {
+		return
+	}
+	if w.varsVisible {
+		w.varsToggle.Color = theme.Color(theme.ColorNamePrimary)
+		w.varsToggle.TextStyle = fyne.TextStyle{Bold: true}
+	} else {
+		w.varsToggle.Color = theme.Color(theme.ColorNamePlaceHolder)
+		w.varsToggle.TextStyle = fyne.TextStyle{}
+	}
+	w.varsToggle.Refresh()
 }
 
 // buildSidebarHeader is the collection header above the request list: a folder
@@ -1103,6 +1194,11 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("Environments…", w.showEnvironmentManager),
 		fyne.NewMenuItem("Tunnels…", func() { w.app.openTunnelsWindow(w) }),
 	)
+	// View ▸ Variables toggles the right-side Variables dock (the footer
+	// "Variables" tap does the same); both call toggleVarsPanel.
+	viewMenu := fyne.NewMenu("View",
+		fyne.NewMenuItem("Variables", w.toggleVarsPanel),
+	)
 	// macOS: Fyne moves items labelled exactly "About" and "Settings…" into the
 	// system application menu (the one named after the app) — and "About" replaces
 	// the default About entry — so they appear where macOS users expect, with no
@@ -1114,7 +1210,7 @@ func (w *Window) buildMainMenu() *fyne.MainMenu {
 		fyne.NewMenuItem("Settings…", func() { w.app.showSettingsDialog(w.win) }),
 		fyne.NewMenuItem("Check for Updates…", func() { w.checkForUpdates(true) }),
 	)
-	return fyne.NewMainMenu(fileMenu, editMenu, collMenu, helpMenu)
+	return fyne.NewMainMenu(fileMenu, editMenu, collMenu, viewMenu, helpMenu)
 }
 
 // openFindActive opens find on the active request's response (Edit ▸ Find…, Cmd/Ctrl+F).
@@ -1536,9 +1632,18 @@ func (w *Window) buildStatusBar() fyne.CanvasObject {
 	w.sbTunnel = mk("")
 	tunnelTap := newTappable(w.sbTunnel, func() { w.app.openTunnelsWindow(w) })
 
-	// Left: version · status · time · size · jump-host. Right: method · path.
-	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta, tunnelTap)
+	// Footer "Variables" toggle: a tappable label that shows/hides the right-side
+	// Variables dock (also reachable via View ▸ Variables). canvas.Text isn't
+	// tappable on its own, so wrap it like the tunnel indicator. syncVarsToggle
+	// (called below) styles it from the seeded w.varsVisible pref.
+	w.varsToggle = mk("Variables")
+	varsTap := newTappable(w.varsToggle, w.toggleVarsPanel)
+
+	// Left: version · status · time · size · jump-host · vars. Right: method · path.
+	left := container.NewHBox(w.sbVersion, w.sbStatus, w.sbMeta, tunnelTap, varsTap)
 	bar := container.NewBorder(nil, nil, left, w.sbReqInfo)
+
+	w.syncVarsToggle()
 
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameMenuBackground))
 	return container.NewStack(bg, container.NewPadded(bar))
