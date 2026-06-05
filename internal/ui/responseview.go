@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/ultramcu/yon/internal/model"
+	"github.com/ultramcu/yon/internal/postresp"
 )
 
 // maxDisplayBytes caps how much of a response body is rendered on screen. Larger
@@ -53,6 +54,12 @@ var (
 var (
 	colorRespHeaderKey = color.NRGBA{R: 0x18, G: 0xc5, B: 0xe8, A: 0xff}
 	styleRespHeaderKey = &widget.CustomTextGridStyle{FGColor: colorRespHeaderKey}
+)
+
+// Test-result colours: green for a passed assertion, red for a failed one.
+var (
+	colorAssertPass = color.NRGBA{R: 0x2e, G: 0x7d, B: 0x32, A: 0xff} // green
+	colorAssertFail = color.NRGBA{R: 0xc6, G: 0x28, B: 0x28, A: 0xff} // red
 )
 
 // responseView renders a model.Response read-only: a status/time/size line, a
@@ -105,11 +112,18 @@ type responseView struct {
 	bodyStack  *fyne.Container
 	bodyScroll *container.Scroll
 
-	// respTabs is the Body/Headers segmented sub-tab control (same component as the
-	// request editor). Body is the default tab and gives bodyStack the full pane;
-	// Headers holds the headersGrid. headersSeg is its button, for the count badge.
+	// respTabs is the Body/Headers/Tests segmented sub-tab control (same component
+	// as the request editor). Body is the default tab and gives bodyStack the full
+	// pane; Headers holds the headersGrid. headersSeg is its button, for the count
+	// badge.
 	respTabs   *segTabs
 	headersSeg *segButton
+
+	// testsSeg is the Tests sub-tab's button (for its pass-count badge), and
+	// testsBox is the VBox that setTestResults fills with assertion ✓/✗ rows, a
+	// captured-values section, and a summary line.
+	testsSeg *segButton
+	testsBox *fyne.Container
 
 	// fullBody is the complete response body, retained even when the display is
 	// truncated, so "Save to file" always writes everything.
@@ -235,6 +249,10 @@ func newResponseView(parent fyne.Window) *responseView {
 	rv.respTabs = newSegTabs()
 	rv.respTabs.Append("Body", rv.bodyStack)
 	rv.headersSeg = rv.respTabs.Append("Headers", container.NewVScroll(rv.headersGrid))
+	// Tests tab: a scrollable VBox that setTestResults fills with the assertion
+	// pass/fail rows + captured values + a summary line. Starts empty/neutral.
+	rv.testsBox = container.NewVBox()
+	rv.testsSeg = rv.respTabs.Append("Tests", container.NewVScroll(rv.testsBox))
 
 	rv.container = container.NewBorder(header, nil, nil, nil, rv.respTabs.object())
 
@@ -356,6 +374,7 @@ func (rv *responseView) setPending() {
 	rv.clearBody()
 	rv.headersGrid.SetText("")
 	rv.setHeadersBadge(0)
+	rv.clearTests()
 }
 
 // setError shows a transport/timeout/cancel error in place of a response.
@@ -372,6 +391,7 @@ func (rv *responseView) setError(err error) {
 	rv.clearBody()
 	rv.headersGrid.SetText("")
 	rv.setHeadersBadge(0)
+	rv.clearTests()
 }
 
 // setResponse renders a completed Response.
@@ -447,6 +467,137 @@ func (rv *responseView) setHeadersBadge(n int) {
 	if rv.headersSeg != nil {
 		rv.headersSeg.setLabel(tabBadge("Headers", n))
 	}
+}
+
+// testsSummary formats the assertion pass tally, e.g. "3/4 passed". Pure +
+// Fyne-free so it can be unit-tested directly.
+func testsSummary(passed, total int) string {
+	return fmt.Sprintf("%d/%d passed", passed, total)
+}
+
+// countAssertionsPassed returns how many of results passed. Pure + Fyne-free.
+func countAssertionsPassed(results []postresp.AssertionResult) int {
+	n := 0
+	for _, r := range results {
+		if r.Passed {
+			n++
+		}
+	}
+	return n
+}
+
+// setTestsBadge shows the passed count on the Tests sub-tab. When there is at
+// least one assertion it shows "Tests 3/4"; with no assertions it shows just
+// "Tests". Safe before the segment exists (no-op).
+func (rv *responseView) setTestsBadge(passed, total int) {
+	if rv.testsSeg == nil {
+		return
+	}
+	if total <= 0 {
+		rv.testsSeg.setLabel("Tests")
+		return
+	}
+	rv.testsSeg.setLabel(fmt.Sprintf("Tests %d/%d", passed, total))
+}
+
+// clearTests empties the Tests tab and resets its badge — used when a send is
+// pending or errors, so stale results from a previous response don't linger.
+func (rv *responseView) clearTests() {
+	if rv.testsBox == nil {
+		return
+	}
+	rv.testsBox.Objects = nil
+	rv.testsBox.Refresh()
+	rv.setTestsBadge(0, 0)
+}
+
+// setTestResults renders the post-response Captures + Assertions into the Tests
+// tab: a summary line ("3/4 passed"), one ✓/✗ row per assertion (red on fail,
+// with its Source/Expr/Op/Expected, the Actual value, and any Err), and a
+// "Captured" section listing each captured name=value. Captured values are
+// session-only (shown for feedback; never persisted). The Tests-tab badge shows
+// the pass tally.
+func (rv *responseView) setTestResults(results []postresp.AssertionResult, captured map[string]string) {
+	if rv.testsBox == nil {
+		return
+	}
+
+	passed := countAssertionsPassed(results)
+	total := len(results)
+
+	objs := make([]fyne.CanvasObject, 0, total+len(captured)+4)
+
+	// Summary line (bold).
+	if total > 0 {
+		objs = append(objs, widget.NewLabelWithStyle(
+			testsSummary(passed, total), fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	} else {
+		objs = append(objs, widget.NewLabel("No assertions."))
+	}
+
+	for _, r := range results {
+		objs = append(objs, rv.assertionRowObject(r))
+	}
+
+	// Captured section: name = value for each session-only captured variable.
+	if len(captured) > 0 {
+		objs = append(objs, widget.NewSeparator())
+		objs = append(objs, widget.NewLabelWithStyle(
+			"Captured", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		// Stable order so the list doesn't reshuffle between sends.
+		names := make([]string, 0, len(captured))
+		for name := range captured {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			line := canvas.NewText(fmt.Sprintf("%s = %s", name, captured[name]), colorRespHeaderKey)
+			line.TextStyle = fyne.TextStyle{Monospace: true}
+			objs = append(objs, line)
+		}
+	}
+
+	rv.testsBox.Objects = objs
+	rv.testsBox.Refresh()
+	rv.setTestsBadge(passed, total)
+}
+
+// assertionRowObject builds the single-line display for one assertion result: a
+// coloured ✓/✗ + the check description, and (on the next line) the Actual value
+// plus any engine Err, in red when the assertion failed.
+func (rv *responseView) assertionRowObject(r postresp.AssertionResult) fyne.CanvasObject {
+	col := colorAssertPass
+	mark := "✓"
+	if !r.Passed {
+		col = colorAssertFail
+		mark = "✗"
+	}
+
+	title := canvas.NewText(fmt.Sprintf("%s  %s", mark, describeAssertion(r.Assertion)), col)
+	title.TextStyle = fyne.TextStyle{Bold: true}
+
+	detailText := fmt.Sprintf("actual: %s", r.Actual)
+	if r.Err != "" {
+		detailText += "   error: " + r.Err
+	}
+	detail := canvas.NewText(detailText, col)
+	detail.TextSize = theme.TextSize() - 1
+
+	return container.NewVBox(title, detail)
+}
+
+// describeAssertion renders an assertion as a compact human string, e.g.
+// "status equals 200" or "jsonBody data.id exists". Pure + Fyne-free.
+func describeAssertion(a model.Assertion) string {
+	src := string(a.Source)
+	if a.Expr != "" {
+		src += " " + a.Expr
+	}
+	s := fmt.Sprintf("%s %s", src, a.Op)
+	if a.Expected != "" {
+		s += " " + a.Expected
+	}
+	return s
 }
 
 // bodyKind classifies a response body for the Pretty path: which formatter and

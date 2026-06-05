@@ -66,7 +66,10 @@ func blindA_sampleResponse() model.Response {
 	}
 }
 
-// SPEC 1: two tabs "Body" + "Headers", Body initially selected.
+// SPEC 1: the first two tabs are "Body" + "Headers" (in that order), with Body
+// initially selected. Issue #27 appended a third "Tests" tab after Headers, so
+// the count is now ≥2 and Body/Headers lead — the original Body-default,
+// Headers-second intent is preserved.
 func TestBlindA_Spec1_TwoTabsBodyDefault(t *testing.T) {
 	rv := blindA_newView(t)
 	tabs := rv.respTabs
@@ -74,8 +77,8 @@ func TestBlindA_Spec1_TwoTabsBodyDefault(t *testing.T) {
 		t.Fatal("rv.respTabs is nil")
 	}
 	labels := blindA_segLabels(tabs)
-	if len(tabs.segs) != 2 {
-		t.Fatalf("expected exactly 2 tabs, got %d: %v", len(tabs.segs), labels)
+	if len(tabs.segs) < 2 {
+		t.Fatalf("expected at least 2 tabs (Body, Headers), got %d: %v", len(tabs.segs), labels)
 	}
 	if labels[0] != "Body" {
 		t.Errorf("tab 0 label = %q, want %q", labels[0], "Body")

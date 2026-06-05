@@ -104,6 +104,14 @@ type Window struct {
 	// don't open the same Request twice and can find a Tab to refresh/select.
 	openTabs map[int]*requestTab
 
+	// runtimeVars holds session-only values captured from earlier responses (a
+	// request's Captures). They feed variables.Scope.Runtime (highest precedence)
+	// via varScope, so a captured token resolves in the next send. These are NEVER
+	// persisted to the .yon/.env — they live only for this window's session. It
+	// starts nil (a nil map is safe in Lookup/varScope) and is lazily created by
+	// startSend the first time a Capture writes a value.
+	runtimeVars map[string]string
+
 	// envs holds the environments loaded from the collection's sibling files
 	// (empty for an unsaved collection). envSelect is the sidebar-header picker
 	// that chooses the active environment; pendingEnvDeletes queues environment

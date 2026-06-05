@@ -30,9 +30,10 @@ func TestRespTabs_HasBodyAndHeadersWithBodySelected(t *testing.T) {
 	if rv.respTabs == nil {
 		t.Fatal("response view should build a segTabs")
 	}
-	// Body and Headers, in that order; Body selected initially.
-	if got := segLabels(rv.respTabs); len(got) != 2 || got[0] != "Body" || got[1] != "Headers" {
-		t.Fatalf("tabs = %v, want [Body Headers]", got)
+	// Body, Headers, Tests, in that order; Body selected initially. (The Tests tab
+	// for issue #27's capture/assertions results is appended after Headers.)
+	if got := segLabels(rv.respTabs); len(got) != 3 || got[0] != "Body" || got[1] != "Headers" || got[2] != "Tests" {
+		t.Fatalf("tabs = %v, want [Body Headers Tests]", got)
 	}
 	if rv.respTabs.selected != 0 {
 		t.Errorf("selected tab = %d, want 0 (Body)", rv.respTabs.selected)

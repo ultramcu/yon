@@ -61,8 +61,10 @@ func TestBTB_TabStripIsBodyThenHeaders_BodyDefault(t *testing.T) {
 		t.Fatal("respTabs is nil — the response view should host a segTabs")
 	}
 	labels := btbSegLabels(rv.respTabs)
-	if len(labels) != 2 {
-		t.Fatalf("tab strip has %d tabs %v, want exactly 2 [Body, Headers]", len(labels), labels)
+	// Issue #27 appended a third "Tests" tab after Headers, so the strip now leads
+	// with Body then Headers (Body default) and may carry a trailing Tests tab.
+	if len(labels) < 2 {
+		t.Fatalf("tab strip has %d tabs %v, want at least 2 [Body, Headers]", len(labels), labels)
 	}
 	if labels[0] != "Body" {
 		t.Errorf("first tab label = %q, want %q", labels[0], "Body")

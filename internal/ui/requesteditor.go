@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/ultramcu/yon/internal/model"
+	"github.com/ultramcu/yon/internal/postresp"
 	"github.com/ultramcu/yon/internal/yonner"
 )
 
@@ -77,6 +78,7 @@ type requestTab struct {
 	bodyTypeSel *widget.Select
 	bodyEntry   *widget.Entry
 	optionsTab  *requestOptionsTab
+	testsTab    *testsTab
 
 	sendBtn *widget.Button
 
@@ -188,6 +190,13 @@ func newRequestTab(w *Window, idx int) *requestTab {
 	// rt.optionsTab.value(), so optionsTab must exist before either can fire.
 	rt.optionsTab = newRequestOptionsTab(rt, req)
 	rt.segTabs.Append("Options", rt.optionsTab.container)
+	// Tests sub-tab (Captures + Assertions). Built after Options for the same
+	// reason: newTestsTab wires its row controls to rt.commit(), and current()
+	// reads rt.testsTab, so the tab must exist before either can fire. Seeding the
+	// rows happens before their OnChanged handlers are wired, so opening a request
+	// with saved captures/assertions does not dirty a fresh tab.
+	rt.testsTab = newTestsTab(rt, req)
+	rt.segTabs.Append("Tests", rt.testsTab.container)
 	rt.refreshTabBadges() // initial counts from the seeded Request
 
 	editorTop := container.NewVBox(
@@ -277,6 +286,16 @@ func (rt *requestTab) current() model.Request {
 	if rt.optionsTab != nil {
 		options = rt.optionsTab.value()
 	}
+	// Captures/Assertions come from the Tests sub-tab. Nil-guard it the same way
+	// (a construction-time commit may fire before the Tests tab is built); the
+	// tab's readers already return nil slices when empty, so the Request's
+	// omitempty drops the JSON keys for a request with no tests.
+	var captures []model.Capture
+	var assertions []model.Assertion
+	if rt.testsTab != nil {
+		captures = rt.testsTab.captures()
+		assertions = rt.testsTab.assertions()
+	}
 	return model.Request{
 		Name:    rt.nameEntry.Text,
 		Method:  model.Method(strings.ToUpper(rt.methodSel.Text)),
@@ -288,7 +307,9 @@ func (rt *requestTab) current() model.Request {
 			Type:    bodyTypeFromLabel(rt.bodyTypeSel.Selected),
 			Content: rt.bodyEntry.Text,
 		},
-		Options: options,
+		Options:    options,
+		Captures:   captures,
+		Assertions: assertions,
 	}
 }
 
@@ -449,6 +470,25 @@ func (rt *requestTab) startSend() {
 			r := resp
 			rt.lastResp = &r
 			rt.response.setResponse(resp)
+
+			// Post-response: run Captures, then Assertions, against this Response.
+			// Captured values are SESSION-ONLY runtime vars (never persisted): merge
+			// them into the window's runtimeVars so the next send resolves them
+			// (highest precedence — see varScope). Assertions are evaluated and the
+			// pass/fail results plus the captured values are rendered in the
+			// response's Tests tab.
+			vars, _ := postresp.RunCaptures(resp, req.Captures)
+			if len(vars) > 0 {
+				if rt.win.runtimeVars == nil {
+					rt.win.runtimeVars = make(map[string]string, len(vars))
+				}
+				for k, v := range vars {
+					rt.win.runtimeVars[k] = v
+				}
+			}
+			results := postresp.RunAssertions(resp, req.Assertions)
+			rt.response.setTestResults(results, vars)
+
 			rt.win.updateStatusBar()
 		})
 	}()

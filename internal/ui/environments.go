@@ -63,13 +63,20 @@ func (w *Window) activeEnv() (model.Environment, bool) {
 // Variable carries its effective Value directly; the Scope.Secrets map is left
 // empty (a secret env/collection variable resolves to its own Value, which the
 // store has populated). When no environment is active, only collection
-// variables apply.
+// variables apply. Session-only runtime values captured from earlier responses
+// (w.runtimeVars) are layered in as Scope.Runtime at the highest precedence, so
+// a captured token overrides any env/collection variable of the same name.
 func (w *Window) varScope() variables.Scope {
 	env, _ := w.activeEnv() // zero Environment when none active → env vars empty
 	return variables.Scope{
 		Env:        env,
 		Collection: w.coll.Variables,
 		Secrets:    nil,
+		// Runtime carries session-only values captured from earlier responses
+		// (a request's Captures); it has the HIGHEST precedence in Scope.Lookup,
+		// so a captured token overrides any env/collection variable of the same
+		// name on the next send. A nil map is fine (no captures yet).
+		Runtime: w.runtimeVars,
 	}
 }
 

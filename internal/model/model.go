@@ -140,6 +140,93 @@ type Request struct {
 	// "options" key, so a Request created before this field existed stays
 	// byte-identical on disk. See RequestOptions for the per-field tri-state.
 	Options *RequestOptions `json:"options,omitempty"`
+	// Captures extract values from the Response into runtime variables (see
+	// variables.Scope.Runtime) for use by later requests. omitempty + nil keeps
+	// a Request authored before this field existed byte-identical on disk.
+	Captures []Capture `json:"captures,omitempty"`
+	// Assertions are post-response checks run against the Response. omitempty +
+	// nil keeps a Request authored before this field existed byte-identical on
+	// disk.
+	Assertions []Assertion `json:"assertions,omitempty"`
+}
+
+// CaptureSource identifies where a Capture reads its value from in a Response.
+type CaptureSource string
+
+// Capture sources.
+const (
+	// CaptureJSONBody reads the value at a JSON path (Capture.Expr) inside the
+	// response body parsed as JSON.
+	CaptureJSONBody CaptureSource = "jsonBody"
+	// CaptureHeader reads the value of the response header named by Capture.Expr
+	// (matched case-insensitively).
+	CaptureHeader CaptureSource = "header"
+)
+
+// Capture extracts a value from a Response and binds it to a runtime variable
+// (see variables.Scope.Runtime) so a later request can reference it as
+// {{variable}}. The extraction is described by Source plus Expr (a JSON path for
+// jsonBody, a header name for header). A disabled Capture is kept but not run.
+type Capture struct {
+	Variable string        `json:"variable"`
+	Source   CaptureSource `json:"source"`
+	Expr     string        `json:"expr,omitempty"`
+	Enabled  bool          `json:"enabled"`
+}
+
+// AssertSource identifies which part of a Response an Assertion inspects.
+type AssertSource string
+
+// Assertion sources.
+const (
+	// AssertStatus inspects the numeric HTTP status code.
+	AssertStatus AssertSource = "status"
+	// AssertJSONBody inspects the value at a JSON path (Assertion.Expr) inside
+	// the response body parsed as JSON.
+	AssertJSONBody AssertSource = "jsonBody"
+	// AssertHeader inspects the response header named by Assertion.Expr
+	// (matched case-insensitively).
+	AssertHeader AssertSource = "header"
+	// AssertResponseTimeMs inspects the response duration in whole milliseconds.
+	AssertResponseTimeMs AssertSource = "responseTimeMs"
+	// AssertRawBody inspects the raw response body as a string.
+	AssertRawBody AssertSource = "rawBody"
+)
+
+// AssertOp is the comparison an Assertion applies to the actual value.
+type AssertOp string
+
+// Assertion operators.
+const (
+	// OpEquals passes when actual equals Expected (both trimmed).
+	OpEquals AssertOp = "equals"
+	// OpNotEquals passes when actual does not equal Expected (both trimmed).
+	OpNotEquals AssertOp = "notEquals"
+	// OpContains passes when actual contains Expected as a substring.
+	OpContains AssertOp = "contains"
+	// OpNotContains passes when actual does not contain Expected as a substring.
+	OpNotContains AssertOp = "notContains"
+	// OpExists passes when the source/path is present in the Response.
+	OpExists AssertOp = "exists"
+	// OpNotExists passes when the source/path is absent from the Response.
+	OpNotExists AssertOp = "notExists"
+	// OpLessThan passes when actual < Expected, both parsed as float64.
+	OpLessThan AssertOp = "lessThan"
+	// OpGreaterThan passes when actual > Expected, both parsed as float64.
+	OpGreaterThan AssertOp = "greaterThan"
+	// OpMatches passes when actual matches the regular expression in Expected.
+	OpMatches AssertOp = "matches"
+)
+
+// Assertion is a single check run against a Response. Source (plus Expr for
+// jsonBody/header) selects the actual value; Op compares it to Expected. A
+// disabled Assertion is kept but not run, and is omitted from results.
+type Assertion struct {
+	Source   AssertSource `json:"source"`
+	Expr     string       `json:"expr,omitempty"`
+	Op       AssertOp     `json:"op"`
+	Expected string       `json:"expected,omitempty"`
+	Enabled  bool         `json:"enabled"`
 }
 
 // RequestOptions are the per-request connection overrides layered on top of the

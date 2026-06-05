@@ -29,13 +29,22 @@ type Scope struct {
 	Env        model.Environment // active environment (Name may be "")
 	Collection []model.Variable  // collection-scoped variables
 	Secrets    map[string]string // secret values by key (supplied from the .env file)
+	// Runtime holds session-only values captured from earlier responses (see
+	// the postresp package). It has the HIGHEST precedence, so a captured token
+	// overrides any env or collection variable of the same name. A nil map is
+	// fine and behaves as if no runtime values were captured.
+	Runtime map[string]string
 }
 
 // Lookup returns the value bound to key and whether it was found. Precedence:
-// the active environment's enabled variables win over collection-scoped enabled
+// session Runtime values (captured from earlier responses) win over the active
+// environment's enabled variables, which win over collection-scoped enabled
 // variables. For a Secret variable the value comes from Secrets[key] (the env/
 // collection entry's own Value is ignored/blank). Disabled variables are skipped.
 func (sc Scope) Lookup(key string) (string, bool) {
+	if v, ok := sc.Runtime[key]; ok {
+		return v, true
+	}
 	if v, ok := lookupIn(sc.Env.Variables, key, sc.Secrets); ok {
 		return v, true
 	}
